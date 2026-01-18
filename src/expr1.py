@@ -24,7 +24,7 @@ def run(epochs):
         track_jacobian=False,
         device=device,
         seed=seed,
-        print_every=20,
+        print_every=epochs//10,
     )
 
     results = {

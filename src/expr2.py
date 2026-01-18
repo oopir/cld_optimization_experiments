@@ -27,7 +27,7 @@ def run(epochs):
             track_jacobian=True,
             device=device,
             seed=seed,
-            print_every=1000,
+            print_every=epochs//10,
         )
     }
     plot_ex2(results)
