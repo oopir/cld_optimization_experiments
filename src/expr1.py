@@ -1,7 +1,7 @@
+import torch
 from .data import load_digits_data
 from .training import train
 from .plots import plot_ex1
-import torch
 
 def run(epochs, n=500):
     torch.cuda.empty_cache()

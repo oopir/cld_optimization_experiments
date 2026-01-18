@@ -1,7 +1,8 @@
+import torch
+
 from .data import load_digits_data
 from .training import train
 from .plots import plot_ex2
-import torch
 
 def run(epochs, n=500, m=None):
     torch.cuda.empty_cache()
@@ -11,7 +12,7 @@ def run(epochs, n=500, m=None):
     data = load_digits_data(n=n, random_labels=True, device=device, seed=seed)
     n = data["X_train"].shape[0]
     d = data["X_train"].shape[1]
-    if m == None:
+    if m is None:
         m = n*d
 
     common = dict(

@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import math
 
 class TwoLayerNet(nn.Module):
     def __init__(self, d_in, hidden, d_out=10):

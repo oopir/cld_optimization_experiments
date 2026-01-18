@@ -1,3 +1,7 @@
+import math
+import torch
+import torch.nn.functional as F
+
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
 from .langevin import langevin_step
 from .linearized import (
@@ -7,9 +11,6 @@ from .linearized import (
     compute_param_jacobians,
     compute_jacobian_dist,
 )
-import torch
-import torch.nn.functional as F
-import math
 
 def get_stats(model, params, params0, data):
     X_train = data["X_train"]
@@ -51,9 +52,9 @@ def train(
     device,
     seed,
     print_every,
-):  
+):
     print("training starts...")
-    
+
     X_train = data["X_train"]
     d = X_train.shape[1]
 
@@ -85,7 +86,7 @@ def train(
         "lin_param_dist_hist": [],
         "lin_param_norm_hist": [],
     }
-    
+
     langevin_gen = torch.Generator(device=device)
     langevin_gen.manual_seed(seed)
 
@@ -124,8 +125,7 @@ def train(
         metrics["param_norm_hist"].append(param_norm)
         sup_sigma_max_v = max(sup_sigma_max_v, sigma_max_v)
 
-        # TODO: integrate this into get_stats later
-        #       BUT remember it's not allowed to be inside "no_grad" blocks/functions
+        # this part should *not* be inside "no_grad" blocks/functions
         if track_jacobian:
             jacobian_dist = compute_jacobian_dist(model, X_probe, jac_init)
             metrics["jacobian_dist_hist"].append(jacobian_dist)

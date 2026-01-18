@@ -1,6 +1,6 @@
+from itertools import cycle
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from itertools import cycle
 
 def plot_ex1(results):
     plt.figure(figsize=(8, 4))
@@ -92,3 +92,4 @@ def plot_ex2(results):
 
     plt.tight_layout()
     plt.show()
+    
