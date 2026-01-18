@@ -72,6 +72,7 @@ def train(
         probe_bs = min(1, X_train.shape[0])
         X_probe = X_train[:probe_bs].to(device)
         jac_init = compute_param_jacobians(model, X_probe)
+        jac_init_norm_sq = sum(float(ji.pow(2).sum().item()) for ji in jac_init)
 
     metrics = {
         "train_loss_hist": [],
@@ -127,7 +128,7 @@ def train(
 
         # this part should *not* be inside "no_grad" blocks/functions
         if track_jacobian:
-            jacobian_dist = compute_jacobian_dist(model, X_probe, jac_init)
+            jacobian_dist = compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq)
             metrics["jacobian_dist_hist"].append(jacobian_dist)
             # jacobian_dist_full = compute_dataset_ntk_drift(model, model_init, X_train[:10], batch_size=1)
             # metrics["jacobian_dist_hist"].append(jacobian_dist_full)

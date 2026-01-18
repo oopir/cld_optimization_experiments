@@ -83,8 +83,8 @@ def plot_ex2(results):
         "dist_from_init": "param distance from init",
         "loss": "loss",
         "param_norm": "param norm",
-        "jacobian_dist_hist": "jacobian distance from init (L2)",
-        "jacobian_dist_hist": "jacobian distance from init (cosine)"
+        "jacobian_dist_hist_l2": "jacobian distance from init (L2)",
+        "jacobian_dist_hist_co": "jacobian distance from init (cosine)"
     }
     log_axes = {"dist_from_init", "param_norm", "jacobian_dist_hist_l2", "jacobian_dist_hist_co"}
 
