@@ -12,21 +12,21 @@ def run(epochs):
     n = data["X_train"].shape[0]
     d = data["X_train"].shape[1]
 
+    common = dict(
+        data=data,
+        eta=1e-5,
+        epochs=epochs,
+        lam_fc1=d / (torch.nn.init.calculate_gain("tanh") ** 2),
+        lam_fc2=n*d,
+        hidden_width=n*d,
+        regularization_scale=1.0,
+        device=device,
+        seed=seed,
+        print_every=epochs//10,
+    )
+
     results = {
-        "noisy": train(
-            data=data,
-            eta=1e-5,
-            epochs=epochs,
-            beta=n * 1e2,
-            lam_fc1=d / (torch.nn.init.calculate_gain("tanh") ** 2),
-            lam_fc2=n * d,
-            hidden_width=n * d,
-            regularization_scale=1.0,
-            use_linearized=True,
-            track_jacobian=True,
-            device=device,
-            seed=seed,
-            print_every=epochs//10,
-        )
+        "clean": train(beta=n*1e5, use_linearized=False, track_jacobian=True, **common),
+        "noisy": train(beta=n*1e2, use_linearized=True, track_jacobian=True, **common),
     }
     plot_ex2(results)

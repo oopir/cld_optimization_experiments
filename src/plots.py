@@ -50,14 +50,16 @@ def plot_ex2(results):
     for name, r in results.items():
         c = next(colors)
 
-        ax1l.plot(r["param_dist_hist"], label=f"{name}", color=c)
+        if name != "clean":
+            ax1l.plot(r["param_dist_hist"], label=f"{name}", color=c)
+            ax1l.plot(r["lin_param_dist_hist"], linestyle="--", label=f"{name} lin", color=c)
 
-        ax1r.plot(r["train_loss_hist"], label=f"{name}", color=c)
-        ax1r.plot(r["lin_train_loss_hist"], linestyle="--", color=c)
+            ax1r.plot(r["train_loss_hist"], label=f"{name}", color=c)
+            ax1r.plot(r["lin_train_loss_hist"], linestyle="--", label=f"{name} lin", color=c)
 
-        skip = len(r["param_norm_hist"]) // 100
-        ax2l.plot(r["param_norm_hist"][::skip], label=f"{name}", color=c)
-        ax2l.plot(r["lin_param_norm_hist"][::skip], linestyle="--", label=f"{name} lin", color=c)
+            skip = len(r["param_norm_hist"]) // 100
+            ax2l.plot(r["param_norm_hist"][::skip], label=f"{name}", color=c)
+            ax2l.plot(r["lin_param_norm_hist"][::skip], linestyle="--", label=f"{name} lin", color=c)
 
         ax2r.plot(r["jacobian_dist_hist"], label=f"{name}", color=c)
 
