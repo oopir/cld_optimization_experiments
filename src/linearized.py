@@ -69,14 +69,27 @@ def compute_param_jacobians(model, X):
     jac_flat = [j.detach().reshape(j.shape[0], -1) for j in jac] # tuple of (out_flat_dim, #weights)
     return jac_flat
 
-def compute_jacobian_dist(model, X_probe, jac_init):
+def compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq=None, eps=1e-12):
     jac_curr = compute_param_jacobians(model, X_probe)
-    total_sq = 0.0
+    total_sq = 0.
+    dot = 0.0
+    norm_c_sq = 0.0
+    norm_i_sq = 0.0 if jac_init_norm_sq is None else float(jac_init_norm_sq)
+
     for jc, ji in zip(jac_curr, jac_init):
         diff = jc - ji
         total_sq += float(diff.pow(2).sum().item())
+
+        dot += float((jc * ji).sum().item())
+        norm_c_sq += float((jc * jc).sum().item())
+        if jac_init_norm_sq is None:
+            norm_i_sq += float((ji * ji).sum().item())
     del jac_curr
-    return math.sqrt(total_sq)
+
+    l2_dist  = math.sqrt(total_sq)
+    cos_dist = 1.0 - dot / ((math.sqrt(norm_c_sq) * math.sqrt(norm_i_sq)) + eps)
+
+    return l2_dist, cos_dist
 
 def compute_dataset_ntk_drift(model, model_init, X_data, batch_size=1):
     device = next(model.parameters()).device
