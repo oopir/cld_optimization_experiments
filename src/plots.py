@@ -56,11 +56,16 @@ def plot_ex2(results):
         ax1r.plot(r["train_loss_hist"], label=f"{name}", color=c)
         ax1r.plot(r["lin_train_loss_hist"], linestyle="--", label=f"{name} lin", color=c)
 
+        x = range(len(r["param_norm_hist"])
         skip = 1
         if len(len(r["param_norm_hist"])) >= 1000:
             skip = len(r["param_norm_hist"]) // 100
-        ax2l.plot(skip, r["param_norm_hist"][::skip], label=f"{name}", color=c)
-        ax2l.plot(skip, r["lin_param_norm_hist"][::skip], linestyle="--", label=f"{name} lin", color=c)
+        ax2l.plot(x[::skip], r["param_norm_hist"][::skip], label=f"{name}", color=c)
+        x = range(len(r["lin_param_norm_hist"])
+        skip = 1
+        if len(len(r["lin_param_norm_hist"])) >= 1000:
+            skip = len(r["lin_param_norm_hist"]) // 100
+        ax2l.plot(x[::skip], r["lin_param_norm_hist"][::skip], linestyle="--", label=f"{name} lin", color=c)
 
         ax2r.plot(r["jacobian_dist_hist"], label=f"{name}", color=c)
 
@@ -76,7 +81,7 @@ def plot_ex2(results):
         "param_norm": "param norm",
         "jacobian_dist_hist": "jacobian distance from init"
     }
-    log_axes = {"dist_from_init", "jacobian_dist_hist"}
+    log_axes = {"dist_from_init", "param_norm", "jacobian_dist_hist"}
 
     for k, ax in axes.items():
         ax.set_title(titles[k])
