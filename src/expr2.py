@@ -3,12 +3,12 @@ from .training import train
 from .plots import plot_ex2
 import torch
 
-def run(epochs):
+def run(epochs, n=500):
     torch.cuda.empty_cache()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     seed = 0
 
-    data = load_digits_data(n=1450, random_labels=True, device=device, seed=seed)
+    data = load_digits_data(n=n, random_labels=True, device=device, seed=seed)
     n = data["X_train"].shape[0]
     d = data["X_train"].shape[1]
 
