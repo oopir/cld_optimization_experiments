@@ -1,4 +1,3 @@
-# ex2_linearized.py
 from .data import load_digits_data
 from .training import train
 from .plots import plot_ex2

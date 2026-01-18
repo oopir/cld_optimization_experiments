@@ -51,7 +51,9 @@ def train(
     device,
     seed,
     print_every,
-):
+):  
+    print("training starts...")
+    
     X_train = data["X_train"]
     d = X_train.shape[1]
 
