@@ -56,8 +56,8 @@ def plot_ex2(results):
         ax1r.plot(r["train_loss_hist"], label=f"{name}", color=c)
         ax1r.plot(r["lin_train_loss_hist"], linestyle="--", label=f"{name} lin", color=c)
 
-        skip = len(r["param_norm_hist"])
-        if len(skip) >= 1000:
+        skip = 1
+        if len(len(r["param_norm_hist"])) >= 1000:
             skip = len(r["param_norm_hist"]) // 100
         ax2l.plot(skip, r["param_norm_hist"][::skip], label=f"{name}", color=c)
         ax2l.plot(skip, r["lin_param_norm_hist"][::skip], linestyle="--", label=f"{name} lin", color=c)
