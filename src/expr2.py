@@ -3,7 +3,7 @@ from .training import train
 from .plots import plot_ex2
 import torch
 
-def run(epochs, n=500):
+def run(epochs, n=500, m=None):
     torch.cuda.empty_cache()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     seed = 0
@@ -11,14 +11,16 @@ def run(epochs, n=500):
     data = load_digits_data(n=n, random_labels=True, device=device, seed=seed)
     n = data["X_train"].shape[0]
     d = data["X_train"].shape[1]
+    if m == None:
+        m = n*d
 
     common = dict(
         data=data,
         eta=1e-5,
         epochs=epochs,
         lam_fc1=d / (torch.nn.init.calculate_gain("tanh") ** 2),
-        lam_fc2=n*d,
-        hidden_width=n*d,
+        lam_fc2=m,
+        hidden_width=m,
         regularization_scale=1.0,
         device=device,
         seed=seed,
