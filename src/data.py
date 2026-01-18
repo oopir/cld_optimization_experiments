@@ -15,7 +15,7 @@ def load_digits_data(n, random_labels=False, device="cpu", seed=42):
         X, y, train_size=n, stratify=y, random_state=seed
     )
     X_test, X_unused, y_test, y_unused = train_test_split(
-        X_tmp, y_tmp, max(10, test_size=n // 5), stratify=y_tmp, random_state=seed
+        X_tmp, y_tmp, test_size=max(10, n//5), stratify=y_tmp, random_state=seed
     )
 
     if random_labels:
