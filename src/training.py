@@ -7,36 +7,15 @@ from .langevin import langevin_step
 from .linearized import (
     init_linearization,
     linearized_forward,
+    compute_param_jacobians
+)
+from .stats import (
+    BASE_METRIC_NAMES,
+    LIN_METRIC_NAMES,
+    get_stats,
     get_linear_stats,
-    compute_param_jacobians,
     compute_jacobian_dist,
 )
-
-def get_stats(model, params, params0, data):
-    X_train = data["X_train"]
-    X_test  = data["X_test"]
-    y_train = data["y_train"]
-    y_test  = data["y_test"]
-    y_train_one_hot = data["y_train_one_hot"]
-
-    train_outputs = model(X_train)
-    pred_train = train_outputs.argmax(dim=1)
-    train_acc = (pred_train == y_train).float().mean().item()
-
-    test_outputs = model(X_test)
-    pred_test = test_outputs.argmax(dim=1)
-    test_acc = (pred_test == y_test).float().mean().item()
-
-    train_loss = loss_fn(train_outputs, y_train_one_hot).item()
-
-    param_dist = torch.sqrt(sum((p-p0).pow(2).sum() for p, p0 in zip(params, params0))).item()
-    param_norm = torch.sqrt(sum(p.pow(2).sum() for p in params)).item()
-    fc1_norm = torch.sqrt(params[0].pow(2).sum()).item()
-    fc2_norm = torch.sqrt(params[1].pow(2).sum()).item()
-
-    sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
-
-    return train_loss, train_acc, test_acc, param_dist, param_norm, fc1_norm, fc2_norm, sigma_max_v
 
 def train(
     data,
@@ -83,31 +62,21 @@ def train(
         jac_init = compute_param_jacobians(model, X_probe)
         jac_init_norm_sq = sum(float(ji.pow(2).sum().item()) for ji in jac_init)
 
-    metrics = {
-        "train_loss_hist": [],
-        "train_acc_hist": [],
-        "test_acc_hist": [],
-        "param_dist_hist": [],
-        "param_norm_hist": [],
-        "param_norm_fc1_hist": [],
-        "param_norm_fc2_hist": [],
-        "jacobian_dist_hist": [],
-        "lin_train_loss_hist": [],
-        "lin_train_acc_hist": [],
-        "lin_test_acc_hist": [],
-        "lin_param_dist_hist": [],
-        "lin_param_norm_hist": [],
-        "lin_param_norm_fc1_hist": [],
-        "lin_param_norm_fc2_hist": [],
-    }
+    metrics = {f"{name}_hist": [] for name in BASE_METRIC_NAMES}
+    if track_jacobian:
+        metrics["jacobian_dist_hist"] = []
+    if use_linearized:
+        for name in LIN_METRIC_NAMES:
+            metrics[f"{name}_hist"] = []
 
     langevin_gen = torch.Generator(device=device)
     langevin_gen.manual_seed(seed)
 
-    train_loss, train_acc, test_acc, _, _, _, _, sup_sigma_max_v = get_stats(model, params, params0, data)
+    stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data)
+    sup_sigma_max_v = stats["sigma_max_v"]
     if use_linearized:
-        lin_train_loss, lin_train_acc, lin_test_acc, _, _, _, _ = get_linear_stats(model, base_params_dict, lin_params, lin_params0, data)
-    print(f"epoch {0:4d} | loss {train_loss:.4f} | train acc {train_acc:.3f} | test acc {test_acc:.3f}")
+        lin_stats = get_linear_stats(model, base_params_dict, lin_params, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0, data)
+    print(f"epoch {0:4d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
     for epoch in range(1, epochs + 1):
         # ------------------- compute grads & perform step ------------------ #
@@ -131,16 +100,10 @@ def train(
 
         # -------------------- compute metrics and stats -------------------- #
         model.eval()
-        train_loss, train_acc, test_acc, param_dist, param_norm, fc1_norm, fc2_norm, sigma_max_v = get_stats(model, params, params0, data)
-        metrics["train_loss_hist"].append(train_loss)
-        metrics["train_acc_hist"].append(train_acc)
-        metrics["test_acc_hist"].append(test_acc)
-        metrics["param_dist_hist"].append(param_dist)
-        metrics["param_norm_hist"].append(param_norm / param_norm0)
-        metrics["param_norm_fc1_hist"].append(fc1_norm / fc1_norm0)
-        metrics["param_norm_fc2_hist"].append(fc2_norm / fc2_norm0)
-        
-        sup_sigma_max_v = max(sup_sigma_max_v, sigma_max_v)
+        stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data)
+        for name in BASE_METRIC_NAMES:
+            metrics[f"{name}_hist"].append(stats[name])
+        sup_sigma_max_v = max(sup_sigma_max_v, stats["sigma_max_v"])
 
         # this part should *not* be inside "no_grad" blocks/functions
         if track_jacobian:
@@ -150,17 +113,12 @@ def train(
             # metrics["jacobian_dist_hist"].append(jacobian_dist_full)
 
         if use_linearized:
-            lin_train_loss, lin_train_acc, lin_test_acc, lin_param_dist, lin_param_norm, lin_fc1_norm, lin_fc2_norm = get_linear_stats(model, base_params_dict, lin_params, lin_params0, data)
-            metrics["lin_train_loss_hist"].append(lin_train_loss)
-            metrics["lin_train_acc_hist"].append(lin_train_acc)
-            metrics["lin_test_acc_hist"].append(lin_test_acc)
-            metrics["lin_param_dist_hist"].append(lin_param_dist)
-            metrics["lin_param_norm_hist"].append(lin_param_norm / lin_param_norm0)
-            metrics["lin_param_norm_fc1_hist"].append(lin_fc1_norm / lin_fc1_norm0)
-            metrics["lin_param_norm_fc2_hist"].append(lin_fc2_norm / lin_fc2_norm0)
+            lin_stats = get_linear_stats(model, base_params_dict, lin_params, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0, data)
+            for name in LIN_METRIC_NAMES:
+                metrics[f"{name}_hist"].append(lin_stats[name])
 
         if epoch % print_every == 0:
-            print(f"epoch {epoch:4d} | loss {train_loss:.4f} | train acc {train_acc:.3f} | test acc {test_acc:.3f}")
+            print(f"epoch {epoch:4d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
     # -------------------- compute remaining stats --------------------- #
     with torch.no_grad():
