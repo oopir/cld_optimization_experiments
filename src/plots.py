@@ -136,27 +136,23 @@ def plot_ex2_multiseed(results):
         mean, std = _mean_std_across_seeds(run_results_by_seed, "param_dist_hist")
         _plot_band(ax1l, mean, std, label=run_name, color=c)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_param_dist_hist")
-        if len(mean) != 0:
-            _plot_band(ax1l, mean, std, label=f"{run_name} lin", color=c, lin=True)
+        _plot_band(ax1l, mean, std, label=f"{run_name} lin", color=c, lin=True)
 
         # loss (nonlinear vs linearized)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
         _plot_band(ax1r, mean, std, label=run_name, color=c)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
-        if len(mean) != 0:
-            _plot_band(ax1r, mean, std, label=f"{run_name} lin", color=c, lin=True)
+        _plot_band(ax1r, mean, std, label=f"{run_name} lin", color=c, lin=True)
 
         # param norms
         mean, std = _mean_std_across_seeds(run_results_by_seed, "param_norm_fc1_hist")
         _plot_band(ax2l, mean, std, label=run_name, color=c)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_param_norm_fc1_hist")
-        if len(mean) != 0:
-            _plot_band(ax2l, mean, std, label=f"{run_name} lin", color=c, lin=True)
+        _plot_band(ax2l, mean, std, label=f"{run_name} lin", color=c, lin=True)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "param_norm_fc2_hist")
         _plot_band(ax2r, mean, std, label=run_name, color=c)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_param_norm_fc2_hist")
-        if len(mean) != 0:
-            _plot_band(ax2r, mean, std, label=f"{run_name} lin", color=c, lin=True)
+        _plot_band(ax2r, mean, std, label=f"{run_name} lin", color=c, lin=True)
 
         # jacobian distances
         jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]

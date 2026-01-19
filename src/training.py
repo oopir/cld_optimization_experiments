@@ -61,9 +61,9 @@ def _init_metrics(track_jacobian, use_linearized):
     metrics = {f"{name}_hist": [] for name in BASE_METRIC_NAMES}
     if track_jacobian:
         metrics["jacobian_dist_hist"] = []
-    if use_linearized:
-        for name in LIN_METRIC_NAMES:
-            metrics[f"{name}_hist"] = []
+    # if use_linearized:
+    for name in LIN_METRIC_NAMES:
+        metrics[f"{name}_hist"] = []
     return metrics
 
 def train(
