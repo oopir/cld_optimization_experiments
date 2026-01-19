@@ -1,4 +1,6 @@
 import math
+import numpy as np
+import random
 import torch
 import torch.nn.functional as F
 
@@ -76,7 +78,6 @@ def train(
     use_linearized,
     track_jacobian,
     device,
-    seed,
     print_every,
 ):
 
@@ -99,9 +100,6 @@ def train(
 
     metrics = _init_metrics(track_jacobian, use_linearized)
 
-    langevin_gen = torch.Generator(device=device)
-    langevin_gen.manual_seed(seed)
-
     print("training starts...")
     stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data)
     sup_sigma_max_v = stats["sigma_max_v"]
@@ -116,7 +114,7 @@ def train(
         outputs = model(X_train)
         train_loss = loss_fn(outputs, data["y_train_one_hot"])
         train_loss.backward()
-        langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale, gen=langevin_gen)
+        langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
 
         if use_linearized:
             for p in lin_params:
@@ -125,7 +123,7 @@ def train(
             lin_outputs = linearized_forward(model, base_params_dict, lin_params, X_train)
             lin_train_loss = loss_fn(lin_outputs, data["y_train_one_hot"])
             lin_train_loss.backward()
-            langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale, gen=langevin_gen)
+            langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
 
         # -------------------- compute metrics and stats -------------------- #
         model.eval()
@@ -159,3 +157,48 @@ def train(
 
     metrics["param_dist_upper_bound"] = param_dist_upper_bound
     return metrics
+
+def train_multiseed(
+    seeds,
+    data,
+    eta,
+    epochs,
+    beta,
+    lam_fc1,
+    lam_fc2,
+    hidden_width,
+    regularization_scale,
+    use_linearized,
+    track_jacobian,
+    device,
+    print_every,
+):
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+    results = {}
+
+    for run_seed in seeds:
+        torch.manual_seed(run_seed)
+        torch.cuda.manual_seed_all(run_seed)
+        np.random.seed(run_seed)
+        random.seed(run_seed)
+
+        metrics = train(
+            data=data,
+            eta=eta,
+            epochs=epochs,
+            beta=beta,
+            lam_fc1=lam_fc1,
+            lam_fc2=lam_fc2,
+            hidden_width=hidden_width,
+            regularization_scale=regularization_scale,
+            use_linearized=use_linearized,
+            track_jacobian=track_jacobian,
+            device=device,
+            print_every=print_every,
+        )
+
+        results[run_seed] = metrics
+
+    return results
