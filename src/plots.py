@@ -110,21 +110,21 @@ def _mean_std_across_seeds(results_by_seed, key):
 
 def _plot_band(ax, mean, std, label, color, lin=False):
     epochs = np.arange(len(mean))
-    
+
     # lower amount of displayed points in order to see dashed line
     skip = 1
-    if len(y) >= 1000:
-        skip = len(y) // 100
+    if len(epochs) >= 1000:
+        skip = len(epochs) // 100
     epochs_s = epochs[::skip]
     mean_s = mean[::skip]
     std_s = std[::skip]
 
     if lin:
-        ax.plot(epochs, mean_s, label=label, color=color, linestyle="--")
-        ax.fill_between(epochs, mean_s - std_s, mean_s + std_s, alpha=0.2, color=color)
+        ax.plot(epochs_s, mean_s, label=label, color=color, linestyle="--")
+        ax.fill_between(epochs_s, mean_s - std_s, mean_s + std_s, alpha=0.2, color=color)
     else:
-        ax.plot(epochs, mean_s, label=label, color=color, linestyle="-")
-        ax.fill_between(epochs, mean_s - std_s, mean_s + std_s, alpha=0.2, color=color)
+        ax.plot(epochs_s, mean_s, label=label, color=color, linestyle="-")
+        ax.fill_between(epochs_s, mean_s - std_s, mean_s + std_s, alpha=0.2, color=color)
 
 def plot_ex2_multiseed(results):
     plt.figure(figsize=(8, 12))
