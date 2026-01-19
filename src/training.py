@@ -104,9 +104,9 @@ def train(
     langevin_gen = torch.Generator(device=device)
     langevin_gen.manual_seed(seed)
 
-    train_loss, train_acc, test_acc, _, _, sup_sigma_max_v = get_stats(model, params, params0, data)
+    train_loss, train_acc, test_acc, _, _, _, _, sup_sigma_max_v = get_stats(model, params, params0, data)
     if use_linearized:
-        lin_train_loss, lin_train_acc, lin_test_acc, _, _ = get_linear_stats(model, base_params_dict, lin_params, lin_params0, data)
+        lin_train_loss, lin_train_acc, lin_test_acc, _, _, _, _ = get_linear_stats(model, base_params_dict, lin_params, lin_params0, data)
     print(f"epoch {0:4d} | loss {train_loss:.4f} | train acc {train_acc:.3f} | test acc {test_acc:.3f}")
 
     for epoch in range(1, epochs + 1):

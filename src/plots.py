@@ -53,7 +53,7 @@ def plot_ex2(results):
     ax2l = plt.subplot(gs[1, 0])   # second row left
     ax2r = plt.subplot(gs[1, 1])   # second row right
     ax3l = plt.subplot(gs[2, 0])   # third  row left
-    ax3r = plt.subplot(gs[2, 0])   # third  row right
+    ax3r = plt.subplot(gs[2, 1])   # third  row right
 
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
     for name, r in results.items():
