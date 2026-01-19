@@ -108,11 +108,14 @@ def _mean_std_across_seeds(results_by_seed, key):
     arr = np.stack(histories, axis=0)  # (n_seeds, T)
     return arr.mean(axis=0), arr.std(axis=0)
 
-def _plot_band(ax, mean, std, label, color):
+def _plot_band(ax, mean, std, label, color, lin=False):
     epochs = np.arange(len(mean))
-    ax.plot(epochs, mean, label=label, color=color)
-    ax.fill_between(epochs, mean - std, mean + std, alpha=0.2, color=color)
-
+    if lin:
+        ax.plot(epochs, mean, label=label, color=color, linestype="--")
+        ax.fill_between(epochs, mean - std, mean + std, alpha=0.2, color=color)
+    else:
+        ax.plot(epochs, mean, label=label, color=color, linestyle="-")
+        ax.fill_between(epochs, mean - std, mean + std, alpha=0.2, color=color)
 
 def plot_ex2_multiseed(results):
     plt.figure(figsize=(8, 12))
@@ -133,23 +136,27 @@ def plot_ex2_multiseed(results):
         mean, std = _mean_std_across_seeds(run_results_by_seed, "param_dist_hist")
         _plot_band(ax1l, mean, std, label=run_name, color=c)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_param_dist_hist")
-        _plot_band(ax1l, mean, std, label=f"{run_name} lin", color=c)
+        if len(mean) != 0:
+            _plot_band(ax1l, mean, std, label=f"{run_name} lin", color=c, lin=True)
 
         # loss (nonlinear vs linearized)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
         _plot_band(ax1r, mean, std, label=run_name, color=c)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
-        _plot_band(ax1r, mean, std, label=f"{run_name} lin", color=c)
+        if len(mean) != 0:
+            _plot_band(ax1r, mean, std, label=f"{run_name} lin", color=c, lin=True)
 
         # param norms
         mean, std = _mean_std_across_seeds(run_results_by_seed, "param_norm_fc1_hist")
         _plot_band(ax2l, mean, std, label=run_name, color=c)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_param_norm_fc1_hist")
-        _plot_band(ax2l, mean, std, label=f"{run_name} lin", color=c)
+        if len(mean) != 0:
+            _plot_band(ax2l, mean, std, label=f"{run_name} lin", color=c, lin=True)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "param_norm_fc2_hist")
         _plot_band(ax2r, mean, std, label=run_name, color=c)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_param_norm_fc2_hist")
-        _plot_band(ax2r, mean, std, label=f"{run_name} lin", color=c)
+        if len(mean) != 0:
+            _plot_band(ax2r, mean, std, label=f"{run_name} lin", color=c, lin=True)
 
         # jacobian distances
         jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]
