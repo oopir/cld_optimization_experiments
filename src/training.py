@@ -17,6 +17,53 @@ from .stats import (
     compute_jacobian_dist,
 )
 
+def _init_base_model_vars(d, hidden_width, device, lam_fc1, lam_fc2):
+
+    model = TwoLayerNet(d_in=d, hidden=hidden_width, d_out=10).to(device)
+    params, lam_tensors = make_lambda_like_params(model, lam_fc1=lam_fc1, lam_fc2=lam_fc2)
+
+    params0 = [p.detach().clone() for p in params]
+    with torch.no_grad():
+        param_norm0 = torch.sqrt(sum(p.pow(2).sum() for p in params0)).item()
+        fc1_norm0 = torch.sqrt(params0[0].pow(2).sum()).item()
+        fc2_norm0 = torch.sqrt(params0[1].pow(2).sum()).item()
+
+    W0 = model.fc1.weight.detach().clone()
+
+    return model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0
+
+def _init_linearization_vars(model, params0, lam_tensors):
+
+    base_params_dict, lin_params, lin_lam_tensors = init_linearization(model, params0, lam_tensors)
+    lin_params0 = [p.detach().clone() for p in lin_params]
+    with torch.no_grad():
+        lin_param_norm0 = torch.sqrt(sum(p.pow(2).sum() for p in lin_params0)).item()
+        lin_fc1_norm0 = torch.sqrt(lin_params0[0].pow(2).sum()).item()
+        lin_fc2_norm0 = torch.sqrt(lin_params0[1].pow(2).sum()).item()
+
+    return (base_params_dict, lin_params, lin_lam_tensors, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0)
+
+def _init_jacobian_track_vars(d, hidden_width, device, model, X_train):
+
+    model_at_init = TwoLayerNet(d_in=d, hidden=hidden_width, d_out=10).to(device)
+    model_at_init.load_state_dict(model.state_dict())
+
+    probe_bs = min(1, X_train.shape[0])
+    X_probe = X_train[:probe_bs].to(device)
+    jac_init = compute_param_jacobians(model, X_probe)
+    jac_init_norm_sq = sum(float(ji.pow(2).sum().item()) for ji in jac_init)
+
+    return model_at_init, X_probe, jac_init, jac_init_norm_sq
+
+def _init_metrics(track_jacobian, use_linearized):
+    metrics = {f"{name}_hist": [] for name in BASE_METRIC_NAMES}
+    if track_jacobian:
+        metrics["jacobian_dist_hist"] = []
+    if use_linearized:
+        for name in LIN_METRIC_NAMES:
+            metrics[f"{name}_hist"] = []
+    return metrics
+
 def train(
     data,
     eta,
@@ -32,50 +79,32 @@ def train(
     seed,
     print_every,
 ):
-    print("training starts...")
 
+    # --------- init environment & compute values at init for stats -------- #
     X_train = data["X_train"]
     d = X_train.shape[1]
 
-    model = TwoLayerNet(d_in=d, hidden=hidden_width, d_out=10).to(device)
-    params, lam_tensors = make_lambda_like_params(model, lam_fc1=lam_fc1, lam_fc2=lam_fc2)
+    model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0 = \
+        _init_base_model_vars(d, hidden_width, device, lam_fc1, lam_fc2)
 
-    params0 = [p.detach().clone() for p in params]
-    W0 = model.fc1.weight.detach().clone()
-    with torch.no_grad():
-        param_norm0 = torch.sqrt(sum(p0.pow(2).sum() for p0 in params0)).item()
-        fc1_norm0 = torch.sqrt(params0[0].pow(2).sum()).item()
-        fc2_norm0 = torch.sqrt(params0[1].pow(2).sum()).item()
-
-    model_init = TwoLayerNet(d_in=d, hidden=hidden_width, d_out=10).to(device)
-    model_init.load_state_dict(model.state_dict())
     if use_linearized:
-        base_params_dict, lin_params, lin_lam_tensors = init_linearization(model, params0, lam_tensors)
-        lin_params0 = [p.detach().clone() for p in lin_params]
-        with torch.no_grad():
-            lin_param_norm0 = torch.sqrt(sum(p0.pow(2).sum() for p0 in lin_params0)).item()
-            lin_fc1_norm0 = torch.sqrt(lin_params0[0].pow(2).sum()).item()
-            lin_fc2_norm0 = torch.sqrt(lin_params0[1].pow(2).sum()).item()
-    if track_jacobian:
-        probe_bs = min(1, X_train.shape[0])
-        X_probe = X_train[:probe_bs].to(device)
-        jac_init = compute_param_jacobians(model, X_probe)
-        jac_init_norm_sq = sum(float(ji.pow(2).sum().item()) for ji in jac_init)
+        (
+            base_params_dict, lin_params, lin_lam_tensors, lin_params0, 
+            lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0
+        ) = _init_linearization_vars(model, params0, lam_tensors)
 
-    metrics = {f"{name}_hist": [] for name in BASE_METRIC_NAMES}
     if track_jacobian:
-        metrics["jacobian_dist_hist"] = []
-    if use_linearized:
-        for name in LIN_METRIC_NAMES:
-            metrics[f"{name}_hist"] = []
+        model_at_init, X_probe, jac_init, jac_init_norm_sq = \
+            _init_jacobian_track_vars(d, hidden_width, device, model, X_train)
+
+    metrics = _init_metrics(track_jacobian, use_linearized)
 
     langevin_gen = torch.Generator(device=device)
     langevin_gen.manual_seed(seed)
 
+    print("training starts...")
     stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data)
     sup_sigma_max_v = stats["sigma_max_v"]
-    if use_linearized:
-        lin_stats = get_linear_stats(model, base_params_dict, lin_params, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0, data)
     print(f"epoch {0:4d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
     for epoch in range(1, epochs + 1):
@@ -109,7 +138,7 @@ def train(
         if track_jacobian:
             jacobian_dist = compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq)
             metrics["jacobian_dist_hist"].append(jacobian_dist)
-            # jacobian_dist_full = compute_dataset_ntk_drift(model, model_init, X_train[:10], batch_size=1)
+            # jacobian_dist_full = compute_dataset_ntk_drift(model, model_at_init, X_train[:10], batch_size=1)
             # metrics["jacobian_dist_hist"].append(jacobian_dist_full)
 
         if use_linearized:
