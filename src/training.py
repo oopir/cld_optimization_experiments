@@ -31,12 +31,12 @@ def get_stats(model, params, params0, data):
 
     param_dist = torch.sqrt(sum((p-p0).pow(2).sum() for p, p0 in zip(params, params0))).item()
     param_norm = torch.sqrt(sum(p.pow(2).sum() for p in params)).item()
-    param_norm0 = torch.sqrt(sum(p0.pow(2).sum() for p0 in params0)).item()
-    rel_param_norm = param_norm / param_norm0
+    fc1_norm = torch.sqrt(params[0].pow(2).sum()).item()
+    fc2_norm = torch.sqrt(params[1].pow(2).sum()).item()
 
     sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
 
-    return train_loss, train_acc, test_acc, param_dist, rel_param_norm, sigma_max_v
+    return train_loss, train_acc, test_acc, param_dist, param_norm, fc1_norm, fc2_norm, sigma_max_v
 
 def train(
     data,
@@ -63,11 +63,20 @@ def train(
 
     params0 = [p.detach().clone() for p in params]
     W0 = model.fc1.weight.detach().clone()
+    with torch.no_grad():
+        param_norm0 = torch.sqrt(sum(p0.pow(2).sum() for p0 in params0)).item()
+        fc1_norm0 = torch.sqrt(params0[0].pow(2).sum()).item()
+        fc2_norm0 = torch.sqrt(params0[1].pow(2).sum()).item()
+
     model_init = TwoLayerNet(d_in=d, hidden=hidden_width, d_out=10).to(device)
     model_init.load_state_dict(model.state_dict())
     if use_linearized:
         base_params_dict, lin_params, lin_lam_tensors = init_linearization(model, params0, lam_tensors)
         lin_params0 = [p.detach().clone() for p in lin_params]
+        with torch.no_grad():
+            lin_param_norm0 = torch.sqrt(sum(p0.pow(2).sum() for p0 in lin_params0)).item()
+            lin_fc1_norm0 = torch.sqrt(lin_params0[0].pow(2).sum()).item()
+            lin_fc2_norm0 = torch.sqrt(lin_params0[1].pow(2).sum()).item()
     if track_jacobian:
         probe_bs = min(1, X_train.shape[0])
         X_probe = X_train[:probe_bs].to(device)
@@ -80,12 +89,16 @@ def train(
         "test_acc_hist": [],
         "param_dist_hist": [],
         "param_norm_hist": [],
+        "param_norm_fc1_hist": [],
+        "param_norm_fc2_hist": [],
         "jacobian_dist_hist": [],
         "lin_train_loss_hist": [],
         "lin_train_acc_hist": [],
         "lin_test_acc_hist": [],
         "lin_param_dist_hist": [],
         "lin_param_norm_hist": [],
+        "lin_param_norm_fc1_hist": [],
+        "lin_param_norm_fc2_hist": [],
     }
 
     langevin_gen = torch.Generator(device=device)
@@ -118,12 +131,15 @@ def train(
 
         # -------------------- compute metrics and stats -------------------- #
         model.eval()
-        train_loss, train_acc, test_acc, param_dist, param_norm, sigma_max_v = get_stats(model, params, params0, data)
+        train_loss, train_acc, test_acc, param_dist, param_norm, fc1_norm, fc2_norm, sigma_max_v = get_stats(model, params, params0, data)
         metrics["train_loss_hist"].append(train_loss)
         metrics["train_acc_hist"].append(train_acc)
         metrics["test_acc_hist"].append(test_acc)
         metrics["param_dist_hist"].append(param_dist)
-        metrics["param_norm_hist"].append(param_norm)
+        metrics["param_norm_hist"].append(param_norm / param_norm0)
+        metrics["param_norm_fc1_hist"].append(fc1_norm / fc1_norm0)
+        metrics["param_norm_fc2_hist"].append(fc2_norm / fc2_norm0)
+        
         sup_sigma_max_v = max(sup_sigma_max_v, sigma_max_v)
 
         # this part should *not* be inside "no_grad" blocks/functions
@@ -134,12 +150,14 @@ def train(
             # metrics["jacobian_dist_hist"].append(jacobian_dist_full)
 
         if use_linearized:
-            lin_train_loss, lin_train_acc, lin_test_acc, lin_param_dist, lin_param_norm = get_linear_stats(model, base_params_dict, lin_params, lin_params0, data)
+            lin_train_loss, lin_train_acc, lin_test_acc, lin_param_dist, lin_param_norm, lin_fc1_norm, lin_fc2_norm = get_linear_stats(model, base_params_dict, lin_params, lin_params0, data)
             metrics["lin_train_loss_hist"].append(lin_train_loss)
             metrics["lin_train_acc_hist"].append(lin_train_acc)
             metrics["lin_test_acc_hist"].append(lin_test_acc)
             metrics["lin_param_dist_hist"].append(lin_param_dist)
-            metrics["lin_param_norm_hist"].append(lin_param_norm)
+            metrics["lin_param_norm_hist"].append(lin_param_norm / lin_param_norm0)
+            metrics["lin_param_norm_fc1_hist"].append(lin_fc1_norm / lin_fc1_norm0)
+            metrics["lin_param_norm_fc2_hist"].append(lin_fc2_norm / lin_fc2_norm0)
 
         if epoch % print_every == 0:
             print(f"epoch {epoch:4d} | loss {train_loss:.4f} | train acc {train_acc:.3f} | test acc {test_acc:.3f}")

@@ -39,10 +39,10 @@ def get_linear_stats(model, base_params_dict, lin_params, lin_params0, data):
 
     param_dist = torch.sqrt(sum((p-p0).pow(2).sum() for p, p0 in zip(lin_params, lin_params0))).item()
     param_norm = torch.sqrt(sum((p).pow(2).sum() for p in lin_params)).item()
-    param_norm0 = torch.sqrt(sum(p0.pow(2).sum() for p0 in lin_params0)).item()
-    rel_param_norm = param_norm / param_norm0
+    fc1_norm = torch.sqrt(lin_params[0].pow(2).sum()).item()
+    fc2_norm = torch.sqrt(lin_params[1].pow(2).sum()).item()
 
-    return train_loss, train_acc, test_acc, param_dist, rel_param_norm
+    return train_loss, train_acc, test_acc, param_dist, param_norm, fc1_norm, fc2_norm
 
 from torch.autograd.functional import jacobian as _jacobian
 from torch.func import functional_call, jvp

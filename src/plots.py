@@ -38,6 +38,13 @@ def plot_ex1(results):
     plt.tight_layout()
     plt.show()
 
+def plot_with_skip(ax, y, c, *, label, linestyle="-"):
+    x = range(len(y))
+    skip = 1
+    if len(y) >= 1000:
+        skip = len(y) // 100
+    ax.plot(x[::skip], y[::skip], color=c, label=label, linestyle=linestyle)
+
 def plot_ex2(results):
     plt.figure(figsize=(8, 12))
     gs   = gridspec.GridSpec(3, 2)
@@ -45,7 +52,8 @@ def plot_ex2(results):
     ax1r = plt.subplot(gs[0, 1])   # first  row right
     ax2l = plt.subplot(gs[1, 0])   # second row left
     ax2r = plt.subplot(gs[1, 1])   # second row right
-    ax3l = plt.subplot(gs[2, 0])   # second row left
+    ax3l = plt.subplot(gs[2, 0])   # third  row left
+    ax3r = plt.subplot(gs[2, 0])   # third  row right
 
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
     for name, r in results.items():
@@ -57,36 +65,32 @@ def plot_ex2(results):
         ax1r.plot(r["train_loss_hist"], label=f"{name}", color=c)
         ax1r.plot(r["lin_train_loss_hist"], linestyle="--", label=f"{name} lin", color=c)
 
-        x = range(len(r["param_norm_hist"]))
-        skip = 1
-        if len(r["param_norm_hist"]) >= 1000:
-            skip = len(r["param_norm_hist"]) // 100
-        ax2l.plot(x[::skip], r["param_norm_hist"][::skip], label=f"{name}", color=c)
-        x = range(len(r["lin_param_norm_hist"]))
-        skip = 1
-        if len(r["lin_param_norm_hist"]) >= 1000:
-            skip = len(r["lin_param_norm_hist"]) // 100
-        ax2l.plot(x[::skip], r["lin_param_norm_hist"][::skip], linestyle="--", label=f"{name} lin", color=c)
+        plot_with_skip(ax2l, r["param_norm_fc1_hist"], c, label=f"{name} (fc1)")
+        plot_with_skip(ax2l, r["lin_param_norm_fc1_hist"], c, label=f"{name} lin (fc1)", linestyle="--")
+        plot_with_skip(ax2r, r["param_norm_fc2_hist"], c, label=f"{name} (fc2)")
+        plot_with_skip(ax2r, r["lin_param_norm_fc2_hist"], c, label=f"{name} lin (fc2)", linestyle="--")
 
         jac_dist_hist_l2, jac_dist_hist_co = zip(*r["jacobian_dist_hist"])
-        ax2r.plot(jac_dist_hist_l2, label=f"{name}", color=c)
-        ax3l.plot(jac_dist_hist_co, label=f"{name}", color=c)
+        ax3l.plot(jac_dist_hist_l2, label=f"{name}", color=c)
+        ax3r.plot(jac_dist_hist_co, label=f"{name}", color=c)
 
     axes = {
         "dist_from_init": ax1l,
         "loss": ax1r,
-        "param_norm": ax2l,
-        "jacobian_dist_hist_l2": ax2r,
-        "jacobian_dist_hist_co": ax3l
+        "param_norm_fc1": ax2l,
+        "param_norm_fc2": ax2r,
+        "jacobian_dist_hist_l2": ax3l,
+        "jacobian_dist_hist_co": ax3r,
     }
     titles = {
         "dist_from_init": "param distance from init",
         "loss": "loss",
-        "param_norm": "param norm",
+        "param_norm_fc1": "param norm (fc1)",
+        "param_norm_fc2": "param norm (fc2)",
         "jacobian_dist_hist_l2": "jacobian distance from init (L2)",
         "jacobian_dist_hist_co": "jacobian distance from init (cosine)"
     }
-    log_axes = {"dist_from_init", "param_norm", "jacobian_dist_hist_l2", "jacobian_dist_hist_co"}
+    log_axes = {"dist_from_init", "param_norm_fc1", "param_norm_fc2", "jacobian_dist_hist_l2", "jacobian_dist_hist_co"}
 
     for k, ax in axes.items():
         ax.set_title(titles[k])
