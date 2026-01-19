@@ -111,7 +111,7 @@ def _mean_std_across_seeds(results_by_seed, key):
 def _plot_band(ax, mean, std, label, color, lin=False):
     epochs = np.arange(len(mean))
     if lin:
-        ax.plot(epochs, mean, label=label, color=color, linestype="--")
+        ax.plot(epochs, mean, label=label, color=color, linestyle="--")
         ax.fill_between(epochs, mean - std, mean + std, alpha=0.2, color=color)
     else:
         ax.plot(epochs, mean, label=label, color=color, linestyle="-")
