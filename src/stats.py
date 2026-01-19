@@ -92,6 +92,7 @@ def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_nor
         "lin_param_norm_fc2": fc2_norm / (fc2_norm0 + 1e-12),
     }
 
+# this part should *not* be inside "no_grad" blocks/functions
 def compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq=None, eps=1e-12):
     jac_curr = compute_param_jacobians(model, X_probe)
     total_sq = 0.
@@ -114,6 +115,7 @@ def compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq=None, eps=1
 
     return l2_dist, cos_dist
 
+# this part should *not* be inside "no_grad" blocks/functions
 def compute_dataset_ntk_drift(model, model_init, X_data, batch_size=1):
     device = next(model.parameters()).device
     total_sq = 0.0
