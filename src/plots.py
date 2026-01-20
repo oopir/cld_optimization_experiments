@@ -127,14 +127,30 @@ def _plot_band(ax, mean, std, label, color, lin=False):
         ax.fill_between(epochs_s, mean_s - std_s, mean_s + std_s, alpha=0.2, color=color)
 
 def plot_ex2_multiseed(results):
-    plt.figure(figsize=(8, 12))
-    gs   = gridspec.GridSpec(3, 2)
-    ax1l = plt.subplot(gs[0, 0])   # first  row left
-    ax1r = plt.subplot(gs[0, 1])   # first  row right
-    ax2l = plt.subplot(gs[1, 0])   # second row left
-    ax2r = plt.subplot(gs[1, 1])   # second row right
-    ax3l = plt.subplot(gs[2, 0])   # third  row left
-    ax3r = plt.subplot(gs[2, 1])   # third  row right
+    # check if any run actually tracked jacobian distances
+    has_jacobian_any = any(
+        any("jacobian_dist_hist" in r for r in run_results_by_seed.values())
+        for run_results_by_seed in results.values()
+    )
+
+    if has_jacobian_any:
+        plt.figure(figsize=(8, 12))
+        gs   = gridspec.GridSpec(3, 2)
+        ax1l = plt.subplot(gs[0, 0])   # first  row left
+        ax1r = plt.subplot(gs[0, 1])   # first  row right
+        ax2l = plt.subplot(gs[1, 0])   # second row left
+        ax2r = plt.subplot(gs[1, 1])   # second row right
+        ax3l = plt.subplot(gs[2, 0])   # third  row left
+        ax3r = plt.subplot(gs[2, 1])   # third  row right
+    else:
+        # no jacobian tracking in any run → only 2 rows
+        plt.figure(figsize=(8, 8))
+        gs   = gridspec.GridSpec(2, 2)
+        ax1l = plt.subplot(gs[0, 0])   # first  row left
+        ax1r = plt.subplot(gs[0, 1])   # first  row right
+        ax2l = plt.subplot(gs[1, 0])   # second row left
+        ax2r = plt.subplot(gs[1, 1])   # second row right
+        ax3l = ax3r = None
 
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
 
@@ -165,35 +181,45 @@ def plot_ex2_multiseed(results):
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_param_norm_fc2_hist")
         _plot_band(ax2r, mean, std, label=f"{run_name} lin", color=c, lin=True)
 
-        # jacobian distances
-        jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]
-        jac_arr = np.stack(jac_histories, axis=0) # (n_seeds, T, 2)
+        # jacobian distances (only for runs that actually have them)
+        if has_jacobian_any and ax3l is not None and ax3r is not None:
+            if all("jacobian_dist_hist" in r for r in run_results_by_seed.values()):
+                jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]
+                jac_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
 
-        l2_mean = jac_arr[:, :, 0].mean(axis=0)
-        l2_std  = jac_arr[:, :, 0].std(axis=0)
-        _plot_band(ax3l, l2_mean, l2_std, label=run_name, color=c)
+                l2_mean = jac_arr[:, :, 0].mean(axis=0)
+                l2_std  = jac_arr[:, :, 0].std(axis=0)
+                _plot_band(ax3l, l2_mean, l2_std, label=run_name, color=c)
 
-        co_mean = jac_arr[:, :, 1].mean(axis=0)
-        co_std  = jac_arr[:, :, 1].std(axis=0)
-        _plot_band(ax3r, co_mean, co_std, label=run_name, color=c)
+                co_mean = jac_arr[:, :, 1].mean(axis=0)
+                co_std  = jac_arr[:, :, 1].std(axis=0)
+                _plot_band(ax3r, co_mean, co_std, label=run_name, color=c)
 
     axes = {
         "dist_from_init": ax1l,
         "loss": ax1r,
         "param_norm_fc1": ax2l,
         "param_norm_fc2": ax2r,
-        "jacobian_dist_hist_l2": ax3l,
-        "jacobian_dist_hist_co": ax3r,
     }
+    if has_jacobian_any and ax3l is not None and ax3r is not None:
+        axes["jacobian_dist_hist_l2"] = ax3l
+        axes["jacobian_dist_hist_co"] = ax3r
+
     titles = {
         "dist_from_init": "param distance from init",
         "loss": "loss",
         "param_norm_fc1": "param norm (fc1)",
         "param_norm_fc2": "param norm (fc2)",
-        "jacobian_dist_hist_l2": "jacobian distance from init (L2)",
-        "jacobian_dist_hist_co": "jacobian distance from init (cosine)",
     }
-    log_axes = {"dist_from_init", "param_norm_fc1", "param_norm_fc2", "jacobian_dist_hist_l2", "jacobian_dist_hist_co"}
+    if has_jacobian_any and ax3l is not None and ax3r is not None:
+        titles.update({
+            "jacobian_dist_hist_l2": "jacobian distance from init (L2)",
+            "jacobian_dist_hist_co": "jacobian distance from init (cosine)",
+        })
+
+    log_axes = {"dist_from_init", "param_norm_fc1", "param_norm_fc2"}
+    if has_jacobian_any and ax3l is not None and ax3r is not None:
+        log_axes.update({"jacobian_dist_hist_l2", "jacobian_dist_hist_co"})
 
     for k, ax in axes.items():
         ax.set_title(titles[k])
