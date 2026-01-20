@@ -46,7 +46,8 @@ def _init_linearization_vars(model, params0, lam_tensors):
     return (base_params_dict, lin_params, lin_lam_tensors, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0)
 
 def _init_jacobian_track_vars(d, hidden_width, device, model, X_train):
-
+    # model_at_init is made in case we will want to track Jacobian
+    # drift w.r.t. full Jacobian and not just a partial probe
     model_at_init = TwoLayerNet(d_in=d, hidden=hidden_width, d_out=10).to(device)
     model_at_init.load_state_dict(model.state_dict())
 
@@ -95,7 +96,7 @@ def train(
         ) = _init_linearization_vars(model, params0, lam_tensors)
 
     if track_jacobian:
-        model_at_init, X_probe, jac_init, jac_init_norm_sq = \
+        _, X_probe, jac_init, jac_init_norm_sq = \
             _init_jacobian_track_vars(d, hidden_width, device, model, X_train)
 
     metrics = _init_metrics(track_jacobian, use_linearized)
@@ -106,7 +107,7 @@ def train(
     print(f"epoch {0:4d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
     for epoch in range(1, epochs + 1):
-        # ------------------- compute grads & perform step ------------------ #
+        # ------------------ compute grads & perform steps ------------------ #
         model.train()
         for p in params:
             if p.grad is not None:
@@ -136,8 +137,6 @@ def train(
         if track_jacobian:
             jacobian_dist = compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq)
             metrics["jacobian_dist_hist"].append(jacobian_dist)
-            # jacobian_dist_full = compute_dataset_ntk_drift(model, model_at_init, X_train[:10], batch_size=1)
-            # metrics["jacobian_dist_hist"].append(jacobian_dist_full)
 
         if use_linearized:
             lin_stats = get_linear_stats(model, base_params_dict, lin_params, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0, data)
@@ -148,14 +147,14 @@ def train(
             print(f"epoch {epoch:4d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
     # -------------------- compute remaining stats --------------------- #
+    # compute Song's theoretical upper bound on the distance from the init
     with torch.no_grad():
         sigma_max_X = torch.linalg.svdvals(X_train).max().item()
         H0 = F.tanh(X_train @ W0.T)
         sigma_min_phi_W0X = torch.linalg.svdvals(H0).min().item()
-
         param_dist_upper_bound = sigma_min_phi_W0X / (2 * math.sqrt(2) * sigma_max_X * sup_sigma_max_v)
-
     metrics["param_dist_upper_bound"] = param_dist_upper_bound
+
     return metrics
 
 def train_multiseed(
