@@ -53,10 +53,12 @@ def plot_ex1_multiseed(results, epochs, track_every):
         c = next(colors)
 
         # distance from init (nonlinear vs linearized)
-        mean, std = _mean_std_across_seeds(run_results_by_seed, "param_dist_hist")
+        mean, std = _mean_std_across_seeds(run_results_by_seed, "NN_to_lin_hist")
         _plot_band(ax1l, x, mean, std, label=run_name, color=c)
-        mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_param_dist_hist")
-        _plot_band(ax1l, x, mean, std, label=f"{run_name} lin", color=c, lin=True)
+        # mean, std = _mean_std_across_seeds(run_results_by_seed, "param_dist_hist")
+        # _plot_band(ax1l, x, mean, std, label=run_name, color=c)
+        # mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_param_dist_hist")
+        # _plot_band(ax1l, x, mean, std, label=f"{run_name} lin", color=c, lin=True)
         # upper_bound_by_seed = np.asarray([r["param_dist_upper_bound"] for r in run_results_by_seed.values()])
         # ax1l.axhline(y=upper_bound_by_seed.mean(), linestyle='--', color='black')
 
@@ -81,7 +83,8 @@ def plot_ex1_multiseed(results, epochs, track_every):
                 _plot_band(ax2r, x, co_mean, co_std, label=run_name, color=c)
 
     axes = {
-        "dist_from_init": ax1l,
+        # "dist_from_init": ax1l,
+        "dist_from_lin": ax1l,
         "train_loss": ax1r,
     }
     if has_jacobian_any and ax2l is not None and ax2r is not None:
@@ -89,7 +92,8 @@ def plot_ex1_multiseed(results, epochs, track_every):
         axes["jacobian_dist_hist_co"] = ax2r
 
     titles = {
-        "dist_from_init": "param distance from init",
+        # "dist_from_init": "param distance from init",
+        "dist_from_lin": "param distance from linearized params",
         "train_loss": "train loss",
     }
     if has_jacobian_any and ax2l is not None and ax2r is not None:

@@ -64,6 +64,7 @@ def _init_metrics(track_jacobian, use_linearized):
     # if use_linearized:
     for name in LIN_METRIC_NAMES:
         metrics[f"{name}_hist"] = []
+    metrics["NN_to_lin_hist"] = []
     return metrics
 
 def train(
@@ -144,6 +145,8 @@ def train(
                 lin_stats = get_linear_stats(model, base_params_dict, lin_params, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0, data)
                 for name in LIN_METRIC_NAMES:
                     metrics[f"{name}_hist"].append(lin_stats[name])
+                NN_to_lin_dist = torch.sqrt(sum((p-q).pow(2).sum() for p, q in zip(params, lin_params))).item()
+                metrics["NN_to_lin_hist"].append(NN_to_lin_dist)
 
             if epoch % print_every == 0:
                 print(f"epoch {epoch:4d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
