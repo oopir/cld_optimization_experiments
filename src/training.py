@@ -79,6 +79,7 @@ def train(
     use_linearized,
     track_jacobian,
     device,
+    track_every,
     print_every,
 ):
 
@@ -128,23 +129,24 @@ def train(
 
         # -------------------- compute metrics and stats -------------------- #
         model.eval()
-        stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data)
-        for name in BASE_METRIC_NAMES:
-            metrics[f"{name}_hist"].append(stats[name])
-        sup_sigma_max_v = max(sup_sigma_max_v, stats["sigma_max_v"])
+        if epoch % track_every == 0:
+            stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data)
+            for name in BASE_METRIC_NAMES:
+                metrics[f"{name}_hist"].append(stats[name])
+            sup_sigma_max_v = max(sup_sigma_max_v, stats["sigma_max_v"])
 
-        # this part should *not* be inside "no_grad" blocks/functions
-        if track_jacobian:
-            jacobian_dist = compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq)
-            metrics["jacobian_dist_hist"].append(jacobian_dist)
+            # this part should *not* be inside "no_grad" blocks/functions
+            if track_jacobian:
+                jacobian_dist = compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq)
+                metrics["jacobian_dist_hist"].append(jacobian_dist)
 
-        if use_linearized:
-            lin_stats = get_linear_stats(model, base_params_dict, lin_params, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0, data)
-            for name in LIN_METRIC_NAMES:
-                metrics[f"{name}_hist"].append(lin_stats[name])
+            if use_linearized:
+                lin_stats = get_linear_stats(model, base_params_dict, lin_params, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0, data)
+                for name in LIN_METRIC_NAMES:
+                    metrics[f"{name}_hist"].append(lin_stats[name])
 
-        if epoch % print_every == 0:
-            print(f"epoch {epoch:4d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
+            if epoch % print_every == 0:
+                print(f"epoch {epoch:4d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
     # -------------------- compute remaining stats --------------------- #
     # compute Song's theoretical upper bound on the distance from the init
@@ -170,6 +172,7 @@ def train_multiseed(
     use_linearized,
     track_jacobian,
     device,
+    track_every,
     print_every,
 ):
     torch.backends.cudnn.deterministic = True
@@ -195,9 +198,9 @@ def train_multiseed(
             use_linearized=use_linearized,
             track_jacobian=track_jacobian,
             device=device,
+            track_every=track_every,
             print_every=print_every,
         )
-
         results[run_seed] = metrics
 
     return results
