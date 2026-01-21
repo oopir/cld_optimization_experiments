@@ -43,7 +43,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
         gs   = gridspec.GridSpec(2, 2)
         ax1l = plt.subplot(gs[0, 0])   # first  row left
         ax1r = plt.subplot(gs[0, 1])   # first  row right
-        ax3l = ax3r = None
+        ax2l = ax2r = None
 
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
 
@@ -84,7 +84,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
         "dist_from_init": ax1l,
         "train_loss": ax1r,
     }
-    if has_jacobian_any and ax3l is not None and ax3r is not None:
+    if has_jacobian_any and ax2l is not None and ax2r is not None:
         axes["jacobian_dist_hist_l2"] = ax2l
         axes["jacobian_dist_hist_co"] = ax2r
 
