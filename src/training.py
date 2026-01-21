@@ -45,13 +45,12 @@ def _init_linearization_vars(model, params0, lam_tensors):
 
     return (base_params_dict, lin_params, lin_lam_tensors, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0)
 
-def _init_jacobian_track_vars(d, hidden_width, device, model, X_train):
+def _init_jacobian_track_vars(d, hidden_width, device, model, X_train, probe_bs):
     # model_at_init is made in case we will want to track Jacobian
     # drift w.r.t. full Jacobian and not just a partial probe
     model_at_init = TwoLayerNet(d_in=d, hidden=hidden_width, d_out=10).to(device)
     model_at_init.load_state_dict(model.state_dict())
 
-    probe_bs = min(1, X_train.shape[0])
     X_probe = X_train[:probe_bs].to(device)
     jac_init = compute_param_jacobians(model, X_probe)
     jac_init_norm_sq = sum(float(ji.pow(2).sum().item()) for ji in jac_init)
@@ -78,6 +77,7 @@ def train(
     regularization_scale,
     use_linearized,
     track_jacobian,
+    jac_probe_size,
     device,
     track_every,
     print_every,
@@ -98,7 +98,7 @@ def train(
 
     if track_jacobian:
         _, X_probe, jac_init, jac_init_norm_sq = \
-            _init_jacobian_track_vars(d, hidden_width, device, model, X_train)
+            _init_jacobian_track_vars(d, hidden_width, device, model, X_train, jac_probe_size)
 
     metrics = _init_metrics(track_jacobian, use_linearized)
 
@@ -171,6 +171,7 @@ def train_multiseed(
     regularization_scale,
     use_linearized,
     track_jacobian,
+    jac_probe_size,
     device,
     track_every,
     print_every,
@@ -197,6 +198,7 @@ def train_multiseed(
             regularization_scale=regularization_scale,
             use_linearized=use_linearized,
             track_jacobian=track_jacobian,
+            jac_probe_sizejac_probe_size,
             device=device,
             track_every=track_every,
             print_every=print_every,
