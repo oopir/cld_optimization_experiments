@@ -102,7 +102,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
             "jacobian_dist_hist_co": "jacobian distance from init (cosine)",
         })
 
-    log_axes = {"dist_from_init"}
+    log_axes = {"dist_from_lin"}
     if has_jacobian_any and ax2l is not None and ax2r is not None:
         log_axes.update({"jacobian_dist_hist_l2", "jacobian_dist_hist_co"})
 
