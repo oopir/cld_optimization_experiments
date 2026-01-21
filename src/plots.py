@@ -69,9 +69,9 @@ def plot_ex1_multiseed(results):
         ax1l.axhline(y=upper_bound_by_seed.mean(), linestyle='--', color='black')
 
         # accuracy (nonlinear vs linearized)
-        mean, std = _mean_std_across_seeds(run_results_by_seed, "train_acc_hist")
+        mean, std = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
         _plot_band(ax1r, mean, std, label=run_name, color=c)
-        mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_train_acc_hist")
+        mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
         _plot_band(ax1r, mean, std, label=f"{run_name} lin", color=c, lin=True)
 
         # jacobian distances (only for runs that actually have them)
@@ -90,7 +90,7 @@ def plot_ex1_multiseed(results):
 
     axes = {
         "dist_from_init": ax1l,
-        "train_acc": ax1r,
+        "train_loss": ax1r,
     }
     if has_jacobian_any and ax3l is not None and ax3r is not None:
         axes["jacobian_dist_hist_l2"] = ax2l
@@ -98,7 +98,7 @@ def plot_ex1_multiseed(results):
 
     titles = {
         "dist_from_init": "param distance from init",
-        "train_acc": "train accuracy",
+        "train_loss": "train loss",
     }
     if has_jacobian_any and ax2l is not None and ax2r is not None:
         titles.update({
