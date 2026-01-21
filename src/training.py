@@ -198,7 +198,7 @@ def train_multiseed(
             regularization_scale=regularization_scale,
             use_linearized=use_linearized,
             track_jacobian=track_jacobian,
-            jac_probe_sizejac_probe_size,
+            jac_probe_size=jac_probe_size,
             device=device,
             track_every=track_every,
             print_every=print_every,
