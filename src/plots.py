@@ -65,8 +65,8 @@ def plot_ex1_multiseed(results):
         _plot_band(ax1l, mean, std, label=run_name, color=c)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_param_dist_hist")
         _plot_band(ax1l, mean, std, label=f"{run_name} lin", color=c, lin=True)
-        upper_bound_by_seed = np.asarray([r["param_dist_upper_bound"] for r in run_results_by_seed.values()])
-        ax1l.axhline(y=upper_bound_by_seed.mean(), linestyle='--', color='black')
+        # upper_bound_by_seed = np.asarray([r["param_dist_upper_bound"] for r in run_results_by_seed.values()])
+        # ax1l.axhline(y=upper_bound_by_seed.mean(), linestyle='--', color='black')
 
         # accuracy (nonlinear vs linearized)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
@@ -156,8 +156,8 @@ def plot_ex2_multiseed(results):
         _plot_band(ax1l, mean, std, label=run_name, color=c)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_param_dist_hist")
         _plot_band(ax1l, mean, std, label=f"{run_name} lin", color=c, lin=True)
-        upper_bound_by_seed = np.asarray([r["param_dist_upper_bound"] for r in run_results_by_seed.values()])
-        ax1l.axhline(y=upper_bound_by_seed.mean(), linestyle='--', color='black')
+        # upper_bound_by_seed = np.asarray([r["param_dist_upper_bound"] for r in run_results_by_seed.values()])
+        # ax1l.axhline(y=upper_bound_by_seed.mean(), linestyle='--', color='black')
 
         # loss (nonlinear vs linearized)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
