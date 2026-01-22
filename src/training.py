@@ -1,8 +1,6 @@
-import math
 import numpy as np
 import random
 import torch
-import torch.nn.functional as F
 
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
 from .langevin import langevin_step

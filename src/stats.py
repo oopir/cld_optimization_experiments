@@ -1,5 +1,6 @@
 import math
 import torch
+import torch.nn.functional as F
 
 from .model import loss_fn
 from .linearized import linearized_forward, compute_param_jacobians
