@@ -17,6 +17,7 @@ from .stats import (
     get_stats,
     get_linear_stats,
     compute_jacobian_dist,
+    compute_dist_bound_under_GF
 )
 
 def _init_base_model_vars(d, hidden_width, device, lam_fc1, lam_fc2):
@@ -157,13 +158,7 @@ def train(
                 )
 
     # -------------------- compute remaining stats --------------------- #
-    # compute Song's theoretical upper bound on the distance from the init
-    with torch.no_grad():
-        sigma_max_X = torch.linalg.svdvals(X_train).max().item()
-        H0 = F.tanh(X_train @ W0.T)
-        sigma_min_phi_W0X = torch.linalg.svdvals(H0).min().item()
-        param_dist_upper_bound = sigma_min_phi_W0X / (2 * math.sqrt(2) * sigma_max_X * sup_sigma_max_v)
-    metrics["param_dist_upper_bound"] = param_dist_upper_bound
+    metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v)
 
     return metrics
 

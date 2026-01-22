@@ -144,3 +144,12 @@ def compute_dataset_ntk_drift(model, model_init, X_data, batch_size=1, eps=1e-12
     cos_dist = 1.0 - dot / ((math.sqrt(norm_c_sq) * math.sqrt(norm_i_sq)) + eps)
 
     return l2_dist, cos_dist
+
+@torch.no_grad()
+def compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v):
+    # compute Song's theoretical upper bound on the distance from the init
+    sigma_max_X = torch.linalg.svdvals(X_train).max().item()
+    H0 = F.tanh(X_train @ W0.T)
+    sigma_min_phi_W0X = torch.linalg.svdvals(H0).min().item()
+    param_dist_upper_bound = sigma_min_phi_W0X / (2 * math.sqrt(2) * sigma_max_X * sup_sigma_max_v)
+    return param_dist_upper_bound
