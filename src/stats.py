@@ -154,3 +154,28 @@ def compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v):
     sigma_min_phi_W0X = torch.linalg.svdvals(H0).min().item()
     param_dist_upper_bound = sigma_min_phi_W0X / (2 * math.sqrt(2) * sigma_max_X * sup_sigma_max_v)
     return param_dist_upper_bound
+
+@torch.no_grad()
+def estimate_lambda_min(X, M=10000, batch_g=64, device=None):
+    # estimate λ_min(E[φ(𝐗𝐠) φ(𝐗𝐠)]) by sampling 𝐠 for M times and then averaging
+    n, d = X.shape
+    A = torch.zeros((n, n), device=device, dtype=X.dtype)
+    done = 0
+    while done < M:
+        b = min(batch_g, M - done)
+        G = torch.randn(d, b, device=device, dtype=X.dtype) # (d,b)
+        Y = torch.tanh(X @ G)                               # (n,b)
+        A += (Y @ Y.T)                                      # sum_k y_k y_k^T over batch
+        done += b
+
+    A /= M
+    A = (A + A.T) * 0.5                                     # symmetrize for numerical safety
+    lam_min = torch.linalg.eigvalsh(A)[0].item()
+    return lam_min
+
+def estimate_loss_floor(X_train, noisy_beta, m, device):
+    # compute L_∞ from Matan's analysis
+    n,d        = X_train.shape
+    lambda_min = estimate_lambda_min(X, device=device)
+    loss_floor = (2/lambda_min) * ((n/noisy_beta) * (1 + d/m) + (n/noisy_beta)**2 * (1 + d*d/m))
+    return loss_floor

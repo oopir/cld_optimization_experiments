@@ -15,7 +15,8 @@ from .stats import (
     get_stats,
     get_linear_stats,
     compute_jacobian_dist,
-    compute_dist_bound_under_GF
+    compute_dist_bound_under_GF,
+    estimate_loss_floor
 )
 
 def _init_base_model_vars(d, hidden_width, device, lam_fc1, lam_fc2):
@@ -157,6 +158,7 @@ def train(
 
     # -------------------- compute remaining stats --------------------- #
     metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v)
+    metrics["loss_floor"] = estimate_loss_floor(X_train, beta, m=hidden_width, device=device)
 
     return metrics
 
