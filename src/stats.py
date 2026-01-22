@@ -176,6 +176,6 @@ def estimate_lambda_min(X, M=10000, batch_g=64, device=None):
 def estimate_loss_floor(X_train, noisy_beta, m, device):
     # compute L_∞ from Matan's analysis
     n,d        = X_train.shape
-    lambda_min = estimate_lambda_min(X, device=device)
+    lambda_min = estimate_lambda_min(X_train, device=device)
     loss_floor = (2/lambda_min) * ((n/noisy_beta) * (1 + d/m) + (n/noisy_beta)**2 * (1 + d*d/m))
     return loss_floor
