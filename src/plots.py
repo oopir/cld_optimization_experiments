@@ -63,8 +63,8 @@ def plot_ex1_multiseed(results, epochs, track_every):
         })
 
     log_axes = set()
-    if has_jacobian_any:
-        log_axes.update({"jacobian_dist_hist_l2", "jacobian_dist_hist_co"})
+    # if has_jacobian_any:
+    #     log_axes.update({"jacobian_dist_hist_l2", "jacobian_dist_hist_co"})
 
     # ------------------------ actual plotting ------------------------ #  
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
