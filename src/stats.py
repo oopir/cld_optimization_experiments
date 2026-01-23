@@ -117,7 +117,7 @@ def compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq=None, eps=1
     return l2_dist, cos_dist
 
 # this part should *not* be inside "no_grad" blocks/functions
-def compute_dataset_ntk_drift(model, model_init, X_data, batch_size=1, eps=1e-12):
+def compute_dataset_ntk_drift(model, model_at_init, X_data, batch_size=1, eps=1e-12):
     device = next(model.parameters()).device
     total_sq = 0.0
     dot = 0.0
@@ -129,7 +129,7 @@ def compute_dataset_ntk_drift(model, model_init, X_data, batch_size=1, eps=1e-12
         X_batch = X_data[start:start + batch_size].to(device)
 
         jac_curr = compute_param_jacobians(model, X_batch)
-        jac_init = compute_param_jacobians(model_init, X_batch)
+        jac_init = compute_param_jacobians(model_at_init, X_batch)
 
         for jc, ji in zip(jac_curr, jac_init):
             diff = jc - ji

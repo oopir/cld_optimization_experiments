@@ -15,6 +15,7 @@ from .stats import (
     get_stats,
     get_linear_stats,
     compute_jacobian_dist,
+    compute_dataset_ntk_drift,
     compute_dist_bound_under_GF,
     estimate_loss_floor
 )
@@ -98,7 +99,7 @@ def train(
         ) = _init_linearization_vars(model, params0, lam_tensors)
 
     if track_jacobian:
-        _, X_probe, jac_init, jac_init_norm_sq = \
+        model_at_init, X_probe, jac_init, jac_init_norm_sq = \
             _init_jacobian_track_vars(d, hidden_width, device, model, X_train, jac_probe_size)
 
     metrics = _init_metrics(track_jacobian, use_linearized)
@@ -106,7 +107,7 @@ def train(
     print("training starts...")
     stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data)
     sup_sigma_max_v = stats["sigma_max_v"]
-    print(f"epoch {0:5d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
+    # print(f"epoch {0:8d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
     for epoch in range(1, epochs + 1):
         # -------------------- compute metrics and stats -------------------- #
@@ -119,7 +120,8 @@ def train(
 
             # this part should *not* be inside "no_grad" blocks/functions
             if track_jacobian:
-                jacobian_dist = compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq)
+                # jacobian_dist = compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq)
+                jacobian_dist = compute_dataset_ntk_drift(model, model_at_init, X_train, batch_size=jac_probe_size)
                 metrics["jacobian_dist_hist"].append(jacobian_dist)
 
             if use_linearized:
@@ -131,7 +133,7 @@ def train(
 
             if epoch % print_every == 1:
                 print(
-                    f"epoch {epoch:5d} | "
+                    f"epoch {epoch:8d} | "
                     f"loss {stats['train_loss']:.4f} (lin: {lin_stats['lin_train_loss']:.4f}) | "
                     f"train acc {stats['train_acc']:.3f} (lin: {lin_stats['lin_train_acc']:.4f}) | "
                     f"test acc {stats['test_acc']:.3f} (lin: {lin_stats['lin_test_acc']:.4f})"
