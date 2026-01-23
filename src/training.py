@@ -129,7 +129,7 @@ def train(
                 NN_to_lin_dist = torch.sqrt(sum((p-q).pow(2).sum() for p, q in zip(params, lin_params))).item()
                 metrics["NN_to_lin_hist"].append(NN_to_lin_dist)
 
-            if epoch % print_every == 0:
+            if epoch % print_every == 1:
                 print(
                     f"epoch {epoch:5d} | "
                     f"loss {stats['train_loss']:.4f} (lin: {lin_stats['lin_train_loss']:.4f}) | "
