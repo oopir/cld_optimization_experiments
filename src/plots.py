@@ -68,7 +68,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
 
     # ------------------------ actual plotting ------------------------ #  
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
-    x      = np.arange(track_every, epochs+1, track_every)
+    x      = np.arange(1, epochs+1, track_every)
 
     for run_name, run_results_by_seed in results.items():
         c = next(colors)

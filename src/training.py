@@ -109,28 +109,9 @@ def train(
     print(f"epoch {0:5d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
     for epoch in range(1, epochs + 1):
-        # ------------------ compute grads & perform steps ------------------ #
-        model.train()
-        for p in params:
-            if p.grad is not None:
-                p.grad.zero_()
-        outputs = model(X_train)
-        train_loss = loss_fn(outputs, data["y_train_one_hot"])
-        train_loss.backward()
-        langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
-
-        if use_linearized:
-            for p in lin_params:
-                if p.grad is not None:
-                    p.grad.zero_()
-            lin_outputs = linearized_forward(model, base_params_dict, lin_params, X_train)
-            lin_train_loss = loss_fn(lin_outputs, data["y_train_one_hot"])
-            lin_train_loss.backward()
-            langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
-
         # -------------------- compute metrics and stats -------------------- #
         model.eval()
-        if epoch % track_every == 0:
+        if epoch % track_every == 1:
             stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data)
             for name in BASE_METRIC_NAMES:
                 metrics[f"{name}_hist"].append(stats[name])
@@ -155,6 +136,27 @@ def train(
                     f"train acc {stats['train_acc']:.3f} (lin: {lin_stats['lin_train_acc']:.4f}) | "
                     f"test acc {stats['test_acc']:.3f} (lin: {lin_stats['lin_test_acc']:.4f})"
                 )
+
+        # ------------------ compute grads & perform steps ------------------ #
+        model.train()
+        for p in params:
+            if p.grad is not None:
+                p.grad.zero_()
+        outputs = model(X_train)
+        train_loss = loss_fn(outputs, data["y_train_one_hot"])
+        train_loss.backward()
+        langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+
+        if use_linearized:
+            for p in lin_params:
+                if p.grad is not None:
+                    p.grad.zero_()
+            lin_outputs = linearized_forward(model, base_params_dict, lin_params, X_train)
+            lin_train_loss = loss_fn(lin_outputs, data["y_train_one_hot"])
+            lin_train_loss.backward()
+            langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+
+        
 
     # -------------------- compute remaining stats --------------------- #
     metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v)
