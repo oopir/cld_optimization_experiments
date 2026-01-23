@@ -16,6 +16,59 @@ def _plot_band(ax, x, mean, std, label, color, lin=False):
         ax.plot(x, mean, label=label, color=color, linestyle="-")
         ax.fill_between(x, mean - std, mean + std, alpha=0.2, color=color)
 
+def plot_ex1_multiseed_short(results, epochs, track_every):
+    # check if any run actually tracked jacobian distances
+    has_jacobian_any = any(
+        any("jacobian_dist_hist" in r for r in run_results_by_seed.values())
+        for run_results_by_seed in results.values()
+    )
+    if not has_jacobian_any:
+        raise RuntimeError("plot_ex1_multiseed_short expects Jacobian data")
+
+    # ------------------------- figure config ------------------------- #
+    # ('axes' dict is used later, so don't push this section to the end)
+    plt.figure(figsize=(8, 4))
+    gs   = gridspec.GridSpec(1, 2)
+    ax1l = plt.subplot(gs[0, 0])   # first  row left
+    ax1r = plt.subplot(gs[0, 1])   # first  row right
+
+    axes = {"train_loss": ax1l, "jacobian_dist_hist_co": ax1r}
+    titles = {
+        "train_loss": "train loss",
+            "jacobian_dist_hist_co": "jacobian distance from init (cosine)",
+    }
+    log_axes = set()
+
+    # ------------------------ actual plotting ------------------------ #  
+    colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
+    x      = np.arange(1, epochs+1, track_every)
+
+    for run_name, run_results_by_seed in results.items():
+        c = next(colors)
+
+        # accuracy/loss (nonlinear vs linearized)
+        mean, std = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
+        _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c)
+        mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
+        _plot_band(axes["train_loss"], x, mean, std, label=f"{run_name} lin", color=c, lin=True)
+
+        # jacobian distance
+        jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]
+        jac_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
+
+        co_mean = jac_arr[:, :, 1].mean(axis=0)
+        co_std  = jac_arr[:, :, 1].std(axis=0)
+        _plot_band(axes["jacobian_dist_hist_co"], x, co_mean, co_std, label=run_name, color=c)
+
+    for k, ax in axes.items():
+        ax.set_title(titles[k])
+        ax.set_xlabel("epoch")
+        if k in log_axes:
+            ax.set_yscale("log")
+        ax.legend()
+    plt.tight_layout()
+    plt.show()
+
 def plot_ex1_multiseed(results, epochs, track_every):
     # check if any run actually tracked jacobian distances
     has_jacobian_any = any(

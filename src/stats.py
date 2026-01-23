@@ -179,3 +179,6 @@ def estimate_loss_floor(X_train, noisy_beta, m, device):
     lambda_min = estimate_lambda_min(X_train, device=device)
     loss_floor = (2/lambda_min) * ((n/noisy_beta) * (1 + d/m) + (n/noisy_beta)**2 * (1 + d*d/m))
     return loss_floor
+
+# for name, metrics_per_seed in results.items():
+#     print(f"loss floor estimation for run {name}: {metrics_per_seed[0]["loss_floor"]}")
