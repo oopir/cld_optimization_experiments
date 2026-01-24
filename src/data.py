@@ -30,8 +30,8 @@ def load_digits_data(n, random_labels=False, device="cpu", seed=42):
     y_test_one_hot  = torch.eye(10, device=device)[y_test]
 
     return {
-        "d_in": X_train[0].shape[1],
-        "d_out": y_train_one_hot[0].shape[0],
+        "d_in": 64,
+        "d_out": 10,
         "X_train": X_train,
         "X_test": X_test,
         "y_train": y_train,
