@@ -14,6 +14,7 @@ class TwoLayerNet(nn.Module):
             torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity="tanh")
             torch.nn.init.kaiming_normal_(self.fc2.weight, mode="fan_in", nonlinearity="linear")
         elif init_type == "mean-field":
+            with torch.no_grad():
                 self.fc1.weight.normal_(0.0, nn.init.calculate_gain("tanh") / d_in)
                 self.fc1.weight.normal_(0.0, nn.init.calculate_gain("linear") / m)
         else:
@@ -38,7 +39,7 @@ def make_lambda_like_params(model, init_type, lam_fc1, lam_fc2):
         if init_type == "standard":
             lam_fc1 = nn.init.calculate_gain("tanh")**2 / model.d_in
             lam_fc2 = nn.init.calculate_gain("linear")**2 / model.m
-        elif init_type == "mean_field":
+        elif init_type == "mean-field":
             lam_fc1 = nn.init.calculate_gain("tanh")**2 / (model.d_in**2)
             lam_fc2 = nn.init.calculate_gain("linear")**2 / (model.m**2)
         else:
