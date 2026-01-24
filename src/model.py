@@ -18,7 +18,7 @@ class TwoLayerNet(nn.Module):
                 self.fc1.weight.normal_(0.0, nn.init.calculate_gain("tanh") / d_in)
                 self.fc1.weight.normal_(0.0, nn.init.calculate_gain("linear") / m)
         elif init_type == "alpha":
-            model.alpha = 0.1  # hardcoded scale factor
+            self.alpha = 0.1  # hardcoded scale factor
 
             torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity="tanh")
             torch.nn.init.kaiming_normal_(self.fc2.weight, mode="fan_in", nonlinearity="linear")
