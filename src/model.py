@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 
 class TwoLayerNet(nn.Module):
-    def __init__(self, d_in, hidden, d_out=10):
+    def __init__(self, d_in, hidden, d_out=10, with_bias=False):
         super().__init__()
-        self.fc1 = nn.Linear(d_in, hidden, bias=False)
-        self.fc2 = nn.Linear(hidden, d_out, bias=False)
+        self.fc1 = nn.Linear(d_in, hidden, bias=with_bias)
+        self.fc2 = nn.Linear(hidden, d_out, bias=with_bias)
         torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity="tanh")
         torch.nn.init.kaiming_normal_(self.fc2.weight, mode="fan_in", nonlinearity="linear")
 
@@ -28,9 +28,9 @@ def make_lambda_like_params(model, lam_fc1, lam_fc2):
     params = []
     for name, p in model.named_parameters():
         params.append(p)
-        if "fc1.weight" in name:
+        if "fc1" in name:
             lam = torch.full_like(p, lam_fc1)
-        elif "fc2.weight" in name:
+        elif "fc2" in name:
             lam = torch.full_like(p, lam_fc2)
         else:
             raise ValueError(f"Unknown parameter name: {name}")
