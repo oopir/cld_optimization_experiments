@@ -24,13 +24,13 @@ class TwoLayerNet(nn.Module):
             torch.nn.init.kaiming_normal_(self.fc2.weight, mode="fan_in", nonlinearity="linear")
 
             with torch.no_grad():
-                self.fc1.weight.mul_(alpha)
-                self.fc2.weight.mul_(alpha)
+                self.fc1.weight.mul_(self.alpha)
+                self.fc2.weight.mul_(self.alpha)
 
                 if self.fc1.bias is not None:
-                    self.fc1.bias.mul_(alpha)
+                    self.fc1.bias.mul_(self.alpha)
                 if self.fc2.bias is not None:
-                    self.fc2.bias.mul_(alpha)
+                    self.fc2.bias.mul_(self.alpha)
         else:
             raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field' or 'alpha'.")
 
