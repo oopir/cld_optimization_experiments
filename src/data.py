@@ -42,9 +42,8 @@ def load_digits_data(n, random_labels=False, device="cpu", seed=42):
 
 
 def load_1d_regression_data(device="cpu"):
-    if X_values is None or y_values is None:
-        X_values = np.array([-1.5, -1.12, -0.74, -0.38, 0, 0.38, 0.74, 1.12, 1.5], dtype=np.float32)
-        y_values = np.array([0, 0, 0, 1, 1, 1, 0, 0, 0], dtype=np.float32)
+    X_values = np.array([-1.5, -1.12, -0.74, -0.38, 0, 0.38, 0.74, 1.12, 1.5], dtype=np.float32)
+    y_values = np.array([0, 0, 0, 1, 1, 1, 0, 0, 0], dtype=np.float32)
 
     X = np.asarray(X_values, dtype=np.float32).reshape(-1, 1)
     y = np.asarray(y_values, dtype=np.float32)
