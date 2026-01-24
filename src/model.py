@@ -17,8 +17,22 @@ class TwoLayerNet(nn.Module):
             with torch.no_grad():
                 self.fc1.weight.normal_(0.0, nn.init.calculate_gain("tanh") / d_in)
                 self.fc1.weight.normal_(0.0, nn.init.calculate_gain("linear") / m)
+        elif init_type == "alpha":
+            alpha = 0.1  # hardcoded scale factor
+
+            torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity="tanh")
+            torch.nn.init.kaiming_normal_(self.fc2.weight, mode="fan_in", nonlinearity="linear")
+
+            with torch.no_grad():
+                self.fc1.weight.mul_(alpha)
+                self.fc2.weight.mul_(alpha)
+
+                if self.fc1.bias is not None:
+                    self.fc1.bias.mul_(alpha)
+                if self.fc2.bias is not None:
+                    self.fc2.bias.mul_(alpha)
         else:
-            raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field'.")
+            raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field' or 'alpha'.")
 
     def forward(self, x):
         x = self.fc1(x)
@@ -36,14 +50,14 @@ def loss_fn(outputs, targets):
 # ---------------------------------------------------------------------------
 def make_lambda_like_params(model, init_type, lam_fc1, lam_fc2):
     if lam_fc1 is None or lam_fc2 is None:
-        if init_type == "standard":
+        if init_type == "standard" or init_type == "alpha":
             lam_fc1 = nn.init.calculate_gain("tanh")**2 / model.d_in
             lam_fc2 = nn.init.calculate_gain("linear")**2 / model.m
         elif init_type == "mean-field":
             lam_fc1 = nn.init.calculate_gain("tanh")**2 / (model.d_in**2)
             lam_fc2 = nn.init.calculate_gain("linear")**2 / (model.m**2)
         else:
-            raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field'.")
+            raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field' or 'alpha'.")
 
     lam_tensors = []
     params = []
