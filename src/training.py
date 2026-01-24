@@ -219,3 +219,81 @@ def train_multiseed(
         results[run_seed] = metrics
 
     return results
+
+def train_and_return_model(
+    beta, 
+    seed, 
+    data, 
+    eta, 
+    epochs, 
+    lam_fc1, 
+    lam_fc2, 
+    hidden_width, 
+    regularization_scale, 
+    device, 
+    print_every
+):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+    X_train = data["X_train"]
+    y_train = data["y_train"].unsqueeze(1)  # (N, 1)
+    d_in = data["d_in"]
+    d_out = data["d_out"]
+
+    model = TwoLayerNet(d_in=d_in, hidden=hidden_width, d_out=d_out, with_bias=True).to(device)
+    params, lam_tensors = make_lambda_like_params(model, lam_fc1, lam_fc2)
+
+    for epoch in range(epochs):
+        model.train()
+        for p in params:
+            if p.grad is not None:
+                p.grad.zero_()
+        outputs = model(X_train)
+        loss = loss_fn(outputs, y_train)
+        loss.backward()
+        langevin_step(params,lam_tensors,beta=beta,eta=eta,regularization_scale=regularization_scale)
+        if epoch % print_every == 0:
+            print(f"    epoch = {epoch:5} | loss = {loss:.2}")
+
+    return model
+
+def get_1d_regression_curves_for_betas(
+    x_plot,
+    betas, 
+    seeds, 
+    data, 
+    eta, 
+    epochs, 
+    lam_fc1, 
+    regularization_scale, 
+    device, 
+    print_every
+):
+    curves = {}
+    m_values = [int(min(1e05, beta * np.log(beta))) for beta in betas]
+    for beta, m in zip(betas, m_values):
+        print(f"beta={beta:.0e}, m={m:.2e}")
+        fs = []
+        for seed in seeds:
+            print(f"  seed={seed}")
+            model = train_and_return_model(
+                beta=beta, 
+                seed=seed, 
+                data=data, 
+                eta=eta, 
+                epochs=epochs, 
+                lam_fc1=lam_fc1, 
+                lam_fc2=m, 
+                hidden_width=m, 
+                regularization_scale=regularization_scale, 
+                device=device, 
+                print_every=print_every
+            )
+            with torch.no_grad():
+                f = model(x_plot).cpu().numpy().ravel()
+            fs.append(f)
+        curves[beta] = np.stack(fs, axis=0)  # (n_seeds, n_grid)
+    return curves

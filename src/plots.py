@@ -272,3 +272,26 @@ def plot_ex2_multiseed(results, epochs, track_every):
 
     plt.tight_layout()
     plt.show()
+
+def plot_1d_regression_curves(data, x_plot, curves_by_beta):
+    x_plot_np = x_plot.cpu().numpy().ravel()
+    X_train_np = data["X_train"].cpu().numpy().ravel()
+    y_train_np = data["y_train"].cpu().numpy().ravel()
+    y_target_np = np.interp(x_plot_np, X_train_np, y_train_np)
+
+    plt.figure(figsize=(6, 4))
+
+    plt.plot(x_plot_np, y_target_np, "k--", label="target")
+    plt.scatter(X_train_np, y_train_np, c="k", s=20, zorder=3)
+    
+    for beta, fs in curves_by_beta.items():
+        mean = fs.mean(axis=0)
+        std = fs.std(axis=0)
+        label = f"β={beta:.1e}"
+        plt.plot(x_plot_np, mean, label=label)
+        plt.fill_between(x_plot_np, mean - std, mean + std, alpha=0.2)
+
+    plt.xlim(-1.5, 1.5)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
