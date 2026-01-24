@@ -20,9 +20,9 @@ from .stats import (
     estimate_loss_floor
 )
 
-def _init_base_model_vars(d, hidden_width, device, lam_fc1, lam_fc2):
+def _init_base_model_vars(d_in, d_out, hidden_width, device, lam_fc1, lam_fc2):
 
-    model = TwoLayerNet(d_in=d, hidden=hidden_width, d_out=10).to(device)
+    model = TwoLayerNet(d_in=d_in, hidden=hidden_width, d_out=d_out).to(device)
     params, lam_tensors = make_lambda_like_params(model, lam_fc1=lam_fc1, lam_fc2=lam_fc2)
 
     params0 = [p.detach().clone() for p in params]
@@ -46,10 +46,10 @@ def _init_linearization_vars(model, params0, lam_tensors):
 
     return (base_params_dict, lin_params, lin_lam_tensors, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0)
 
-def _init_jacobian_track_vars(d, hidden_width, device, model, X_train, probe_bs):
+def _init_jacobian_track_vars(d, d_out, hidden_width, device, model, X_train, probe_bs):
     # model_at_init is made in case we will want to track Jacobian
     # drift w.r.t. full Jacobian and not just a partial probe
-    model_at_init = TwoLayerNet(d_in=d, hidden=hidden_width, d_out=10).to(device)
+    model_at_init = TwoLayerNet(d_in=d, hidden=hidden_width, d_out=d_out).to(device)
     model_at_init.load_state_dict(model.state_dict())
 
     X_probe = X_train[:probe_bs].to(device)
@@ -90,7 +90,7 @@ def train(
     d = X_train.shape[1]
 
     model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0 = \
-        _init_base_model_vars(d, hidden_width, device, lam_fc1, lam_fc2)
+        _init_base_model_vars(d, data["d_out"], hidden_width, device, lam_fc1, lam_fc2)
 
     if use_linearized:
         (
@@ -100,7 +100,7 @@ def train(
 
     if track_jacobian:
         model_at_init, X_probe, jac_init, jac_init_norm_sq = \
-            _init_jacobian_track_vars(d, hidden_width, device, model, X_train, jac_probe_size)
+            _init_jacobian_track_vars(d, data["d_out"], hidden_width, device, model, X_train, jac_probe_size)
 
     metrics = _init_metrics(track_jacobian, use_linearized)
 
@@ -145,7 +145,10 @@ def train(
             if p.grad is not None:
                 p.grad.zero_()
         outputs = model(X_train)
-        train_loss = loss_fn(outputs, data["y_train_one_hot"])
+        if "y_train_one_hot" in data:
+            train_loss = loss_fn(outputs, data["y_train_one_hot"])
+        else:
+            train_loss = loss_fn(outputs, data["y_train"])
         train_loss.backward()
         langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
 
@@ -154,7 +157,10 @@ def train(
                 if p.grad is not None:
                     p.grad.zero_()
             lin_outputs = linearized_forward(model, base_params_dict, lin_params, X_train)
-            lin_train_loss = loss_fn(lin_outputs, data["y_train_one_hot"])
+            if "y_train_one_hot" in data:
+                lin_train_loss = loss_fn(lin_outputs, data["y_train_one_hot"])
+            else:
+                lin_train_loss = loss_fn(lin_outputs, data["y_train"])
             lin_train_loss.backward()
             langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
 

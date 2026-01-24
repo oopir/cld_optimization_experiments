@@ -30,7 +30,10 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data):
     X_test  = data["X_test"]
     y_train = data["y_train"]
     y_test  = data["y_test"]
-    y_train_one_hot = data["y_train_one_hot"]
+    if "y_train_one_hot" in data:
+        y_train_one_hot = data["y_train_one_hot"]
+    else:
+        y_train_one_hot = None
 
     train_outputs = model(X_train)
     pred_train = train_outputs.argmax(dim=1)
@@ -40,7 +43,10 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data):
     pred_test = test_outputs.argmax(dim=1)
     test_acc = (pred_test == y_test).float().mean().item()
 
-    train_loss = loss_fn(train_outputs, y_train_one_hot).item()
+    if y_train_one_hot is not None:
+        train_loss = loss_fn(train_outputs, y_train_one_hot).item()
+    else:
+        train_loss = loss_fn(train_outputs, y_train).item()
 
     param_dist = torch.sqrt(sum((p-p0).pow(2).sum() for p, p0 in zip(params, params0))).item()
     param_norm = torch.sqrt(sum(p.pow(2).sum() for p in params)).item()
@@ -66,7 +72,10 @@ def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_nor
     X_test  = data["X_test"]
     y_train = data["y_train"]
     y_test  = data["y_test"]
-    y_train_one_hot = data["y_train_one_hot"]
+    if "y_train_one_hot" in data:
+        y_train_one_hot = data["y_train_one_hot"]
+    else:
+        y_train_one_hot = None
 
     outputs_train = linearized_forward(model, base_params_dict, lin_params, X_train)
     pred_train = outputs_train.argmax(dim=1)
@@ -76,7 +85,10 @@ def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_nor
     pred_test = outputs_test.argmax(dim=1)
     test_acc = (pred_test == y_test).float().mean().item()
 
-    train_loss = loss_fn(outputs_train, y_train_one_hot).item()
+    if y_train_one_hot is not None:
+        train_loss = loss_fn(outputs_train, y_train_one_hot).item()
+    else:
+        train_loss = loss_fn(outputs_train, y_train).item()
 
     param_dist = torch.sqrt(sum((p-p0).pow(2).sum() for p, p0 in zip(lin_params, lin_params0))).item()
     param_norm = torch.sqrt(sum((p).pow(2).sum() for p in lin_params)).item()
