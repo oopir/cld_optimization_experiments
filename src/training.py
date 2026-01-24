@@ -274,7 +274,8 @@ def get_1d_regression_curves_for_betas(
 ):
     curves = {}
     m_values = [int(min(1e05, beta * np.log(beta))) for beta in betas]
-    for beta, m in zip(betas, m_values):
+    m_max = max(m_values)
+    for beta in betas:
         print(f"beta={beta:.0e}, m={m:.2e}")
         fs = []
         for seed in seeds:
@@ -286,8 +287,8 @@ def get_1d_regression_curves_for_betas(
                 eta=eta, 
                 epochs=epochs, 
                 lam_fc1=lam_fc1, 
-                lam_fc2=m, 
-                hidden_width=m, 
+                lam_fc2=m_max, 
+                hidden_width=m_max, 
                 regularization_scale=regularization_scale, 
                 device=device, 
                 print_every=print_every
