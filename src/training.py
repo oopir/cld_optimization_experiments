@@ -20,10 +20,10 @@ from .stats import (
     estimate_loss_floor
 )
 
-def _init_base_model_vars(d_in, d_out, hidden_width, device, lam_fc1, lam_fc2):
+def _init_base_model_vars(d_in, d_out, m, init_type, device, lam_fc1, lam_fc2):
 
-    model = TwoLayerNet(d_in=d_in, hidden=hidden_width, d_out=d_out).to(device)
-    params, lam_tensors = make_lambda_like_params(model, lam_fc1=lam_fc1, lam_fc2=lam_fc2)
+    model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, init_type=init_type).to(device)
+    params, lam_tensors = make_lambda_like_params(model, init_type, lam_fc1=lam_fc1, lam_fc2=lam_fc2)
 
     params0 = [p.detach().clone() for p in params]
     with torch.no_grad():
@@ -46,10 +46,10 @@ def _init_linearization_vars(model, params0, lam_tensors):
 
     return (base_params_dict, lin_params, lin_lam_tensors, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0)
 
-def _init_jacobian_track_vars(d, d_out, hidden_width, device, model, X_train, probe_bs):
+def _init_jacobian_track_vars(d, d_out, m, init_type, device, model, X_train, probe_bs):
     # model_at_init is made in case we will want to track Jacobian
     # drift w.r.t. full Jacobian and not just a partial probe
-    model_at_init = TwoLayerNet(d_in=d, hidden=hidden_width, d_out=d_out).to(device)
+    model_at_init = TwoLayerNet(d_in=d, m=m, d_out=d_out, init_type=init_type).to(device)
     model_at_init.load_state_dict(model.state_dict())
 
     X_probe = X_train[:probe_bs].to(device)
@@ -73,16 +73,17 @@ def train(
     eta,
     epochs,
     beta,
-    lam_fc1,
-    lam_fc2,
-    hidden_width,
-    regularization_scale,
-    use_linearized,
-    track_jacobian,
-    jac_probe_size,
-    device,
-    track_every,
-    print_every,
+    m,
+    init_type="standard",
+    lam_fc1=None,
+    lam_fc2=None,
+    regularization_scale=1.0,
+    use_linearized=True,
+    track_jacobian=True,
+    jac_probe_size=1,
+    device="cpu",
+    track_every=1,
+    print_every=100,
 ):
 
     # --------- init environment & compute values at init for stats -------- #
@@ -90,7 +91,7 @@ def train(
     d = X_train.shape[1]
 
     model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0 = \
-        _init_base_model_vars(d, data["d_out"], hidden_width, device, lam_fc1, lam_fc2)
+        _init_base_model_vars(data["d_in"], data["d_out"], m, init_type, device, lam_fc1, lam_fc2)
 
     if use_linearized:
         (
@@ -100,7 +101,7 @@ def train(
 
     if track_jacobian:
         model_at_init, X_probe, jac_init, jac_init_norm_sq = \
-            _init_jacobian_track_vars(d, data["d_out"], hidden_width, device, model, X_train, jac_probe_size)
+            _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, device, model, X_train, jac_probe_size)
 
     metrics = _init_metrics(track_jacobian, use_linearized)
 
@@ -168,7 +169,7 @@ def train(
 
     # -------------------- compute remaining stats --------------------- #
     metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v)
-    metrics["loss_floor"] = estimate_loss_floor(X_train, beta, m=hidden_width, device=device)
+    metrics["loss_floor"] = estimate_loss_floor(X_train, beta, m=m, device=device)
 
     return metrics
 
@@ -178,16 +179,17 @@ def train_multiseed(
     eta,
     epochs,
     beta,
-    lam_fc1,
-    lam_fc2,
-    hidden_width,
-    regularization_scale,
-    use_linearized,
-    track_jacobian,
-    jac_probe_size,
-    device,
-    track_every,
-    print_every,
+    m,
+    init_type="standard",
+    lam_fc1=None,
+    lam_fc2=None,
+    regularization_scale=1.0,
+    use_linearized=True,
+    track_jacobian=True,
+    jac_probe_size=1,
+    device="cpu",
+    track_every=1,
+    print_every=100,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -205,9 +207,10 @@ def train_multiseed(
             eta=eta,
             epochs=epochs,
             beta=beta,
+            m=m,
+            init_type=init_type,
             lam_fc1=lam_fc1,
             lam_fc2=lam_fc2,
-            hidden_width=hidden_width,
             regularization_scale=regularization_scale,
             use_linearized=use_linearized,
             track_jacobian=track_jacobian,
@@ -220,18 +223,20 @@ def train_multiseed(
 
     return results
 
+
 def train_and_return_model(
-    beta, 
-    seed, 
-    data, 
-    eta, 
-    epochs, 
-    lam_fc1, 
-    lam_fc2, 
-    hidden_width, 
-    regularization_scale, 
-    device, 
-    print_every
+    seed,
+    data,
+    eta,
+    epochs,
+    beta,
+    m,
+    init_type="standard",
+    lam_fc1=None,
+    lam_fc2=None,
+    regularization_scale=1.0,
+    device="cpu",
+    print_every=100,
 ):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -243,8 +248,8 @@ def train_and_return_model(
     d_in = data["d_in"]
     d_out = data["d_out"]
 
-    model = TwoLayerNet(d_in=d_in, hidden=hidden_width, d_out=d_out, with_bias=True).to(device)
-    params, lam_tensors = make_lambda_like_params(model, lam_fc1, lam_fc2)
+    model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, with_bias=True, init_type=init_type).to(device)
+    params, lam_tensors = make_lambda_like_params(model, init_type, lam_fc1, lam_fc2)
 
     for epoch in range(epochs):
         model.train()
@@ -262,15 +267,15 @@ def train_and_return_model(
 
 def get_1d_regression_curves_for_betas(
     x_plot,
-    betas, 
     seeds, 
     data, 
     eta, 
     epochs, 
-    lam_fc1, 
-    regularization_scale, 
-    device, 
-    print_every
+    betas, 
+    init_type="standard",
+    regularization_scale=1.0, 
+    device="cpu", 
+    print_every=100
 ):
     curves = {}
     m_values = [int(min(1e05, beta * np.log(beta))) for beta in betas]
@@ -281,14 +286,13 @@ def get_1d_regression_curves_for_betas(
         for seed in seeds:
             print(f"  seed={seed}")
             model = train_and_return_model(
-                beta=beta, 
                 seed=seed, 
                 data=data, 
                 eta=eta, 
                 epochs=epochs, 
-                lam_fc1=lam_fc1, 
-                lam_fc2=m_max, 
-                hidden_width=m_max, 
+                beta=beta, 
+                m=m_max,
+                init_type=init_type,
                 regularization_scale=regularization_scale, 
                 device=device, 
                 print_every=print_every
