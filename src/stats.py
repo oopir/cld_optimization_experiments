@@ -124,7 +124,10 @@ def compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq=None, eps=1
     del jac_curr
 
     l2_dist  = math.sqrt(total_sq)
-    cos_dist = 1.0 - dot / ((math.sqrt(norm_c_sq) * math.sqrt(norm_i_sq)) + eps)
+
+    cos_sim = dot / ((math.sqrt(norm_c_sq) * math.sqrt(norm_i_sq)) + eps)
+    cos_sim = max(-1.0, min(1.0, cos_sim)) # handles numerical instability that arises on the regression data
+    cos_dist = 1.0 - cos_sim
 
     return l2_dist, cos_dist
 
@@ -154,7 +157,10 @@ def compute_dataset_ntk_drift(model, model_at_init, X_data, batch_size=1, eps=1e
         del jac_curr, jac_init  # free per-batch Jacobians
 
     l2_dist  = math.sqrt(total_sq)
-    cos_dist = 1.0 - dot / ((math.sqrt(norm_c_sq) * math.sqrt(norm_i_sq)) + eps)
+    
+    cos_sim = dot / ((math.sqrt(norm_c_sq) * math.sqrt(norm_i_sq)) + eps)
+    cos_sim = max(-1.0, min(1.0, cos_sim)) # handles numerical instability that arises on the regression data
+    cos_dist = 1.0 - cos_sim
 
     return l2_dist, cos_dist
 
