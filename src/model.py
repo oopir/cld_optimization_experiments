@@ -16,7 +16,7 @@ class TwoLayerNet(nn.Module):
         elif init_type == "mean-field":
             with torch.no_grad():
                 self.fc1.weight.normal_(0.0, nn.init.calculate_gain("tanh") / d_in)
-                self.fc1.weight.normal_(0.0, nn.init.calculate_gain("linear") / m)
+                self.fc2.weight.normal_(0.0, nn.init.calculate_gain("linear") / m)
         elif init_type == "alpha":
             self.alpha = 0.1  # hardcoded scale factor
 
