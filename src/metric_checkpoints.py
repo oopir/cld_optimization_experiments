@@ -43,7 +43,7 @@ def save_exp1_checkpoint(path, results, config: Exp1Config):
     torch.save(payload, path)
 
 def load_exp1_checkpoint(path):
-    payload = torch.load(path, map_location="cpu", weights_only=False))
+    payload = torch.load(path, map_location="cpu", weights_only=False)
     return payload["results"], payload["config"]
 
 
