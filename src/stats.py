@@ -5,13 +5,6 @@ import torch.nn.functional as F
 from .model import loss_fn
 from .linearized import linearized_forward, compute_param_jacobians
 
-'''
-metrics I want:
-- cosine distance between NN params and linear params
-- check what metrics were important to him beforehand
-- check the metrics from that paper daniel sent yesterday
-'''
-
 BASE_METRIC_NAMES = [
     "train_loss",
     "train_acc",
@@ -20,6 +13,9 @@ BASE_METRIC_NAMES = [
     "param_norm",
     "param_norm_fc1",
     "param_norm_fc2",
+    "feat_rel_dist",
+    "feat_cos_dist",  
+    "feat_gram_lambda",
 ]
 LIN_METRIC_NAMES = [
     "lin_train_loss",
@@ -32,7 +28,7 @@ LIN_METRIC_NAMES = [
 ]
 
 @torch.no_grad()
-def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data):
+def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data):
     X_train = data["X_train"]
     X_test  = data["X_test"]
     y_train = data["y_train"]
@@ -62,6 +58,19 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data):
 
     sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
 
+    A_t = torch.tanh(model.fc1(X_train))
+    dist = (A_t - A0).norm().item()
+    feat_rel_dist = dist / (A0_norm + 1e-12)
+
+    v_t = A_t.view(-1)
+    v0 = A0.view(-1)
+    cos_sim = F.cosine_similarity(v_t, v0, dim=0).item()
+    feat_cos_dist = 1.0 - cos_sim
+
+    A_Gram = A_t @ A_t.T
+    A_Gram = 0.5 * (A_Gram + A_Gram.T)  # numerical symmetrization
+    feat_gram_lambda = torch.linalg.eigvalsh(A_Gram)[0].item()
+
     return {
         "train_loss": train_loss,
         "train_acc": train_acc,
@@ -70,7 +79,10 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data):
         "param_norm": param_norm / (param_norm0 + 1e-12),
         "param_norm_fc1": fc1_norm / (fc1_norm0 + 1e-12),
         "param_norm_fc2": fc2_norm / (fc2_norm0 + 1e-12),
-        "sigma_max_v": sigma_max_v
+        "sigma_max_v": sigma_max_v,
+        "feat_rel_dist": feat_rel_dist,
+        "feat_cos_dist": feat_cos_dist,
+        "feat_gram_min": feat_gram_lambda,
     }
 
 @torch.no_grad()
@@ -184,7 +196,7 @@ def compute_dataset_ntk_drift(model, model_at_init, X_data, batch_size=1, eps=1e
 
         del jac_curr, jac_init  # free per-batch Jacobians
 
-    l2_dist  = math.sqrt(total_sq)
+    l2_dist  = math.sqrt(total_sq) / (math.sqrt(norm_i_sq) + eps)
     
     cos_sim = dot / ((math.sqrt(norm_c_sq) * math.sqrt(norm_i_sq)) + eps)
     cos_sim = max(-1.0, min(1.0, cos_sim)) # handles numerical instability that arises on the regression data

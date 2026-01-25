@@ -106,10 +106,14 @@ def train(
         model_at_init, X_probe, jac_init, jac_init_norm_sq = \
             _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, device, model, X_train, jac_probe_size)
 
+    with torch.no_grad():
+        A0 = torch.tanh(X_train @ model.fc1.weight.T)
+        A0_norm = A0.norm().item()
+
     metrics = _init_metrics(track_jacobian, use_linearized)
 
     print("training starts...")
-    stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data)
+    stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
     sup_sigma_max_v = stats["sigma_max_v"]
     # print(f"epoch {0:8d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
@@ -117,7 +121,7 @@ def train(
         # -------------------- compute metrics and stats -------------------- #
         model.eval()
         if epoch % track_every == 1:
-            stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, data)
+            stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
             for name in BASE_METRIC_NAMES:
                 metrics[f"{name}_hist"].append(stats[name])
             sup_sigma_max_v = max(sup_sigma_max_v, stats["sigma_max_v"])

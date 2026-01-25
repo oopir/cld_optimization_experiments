@@ -81,22 +81,37 @@ def plot_ex1_multiseed(results, epochs, track_every):
     # ------------------------- figure config ------------------------- #
     # ('axes' dict is used later, so don't push this section to the end)
     plt.figure(figsize=(10, 10))
-    gs   = gridspec.GridSpec(2, 2)
-    ax1l = plt.subplot(gs[0, 0])   # first  row left
-    ax1r = plt.subplot(gs[0, 1])   # first  row right
-    ax2l = plt.subplot(gs[1, 0])   # second row left
+    gs   = gridspec.GridSpec(4, 2)
+    ax1l = plt.subplot(gs[0, 0])
+    ax1r = plt.subplot(gs[0, 1])
+    ax2l = plt.subplot(gs[1, 0])
+    ax2r = plt.subplot(gs[1, 1])
+    ax3l = plt.subplot(gs[2, 0])
+    ax3r = plt.subplot(gs[2, 1])
+    ax4l = plt.subplot(gs[3, 0])
+    ax4r = plt.subplot(gs[3, 1])
 
     axes = {
-        "jacobian_dist_hist_co": ax1l,
-        "nn_to_lin_dist_co": ax1r,
-        "train_loss": ax2l,
+        "jacobian_dist_l2": ax1l,
+        "jacobian_dist_co": ax1r,
+        "nn_to_lin_dist_l2": ax2l,
+        "nn_to_lin_dist_co": ax2r,
+        "feat_rel_dist": ax3l,
+        "feat_cos_dist": ax3r,
+        "feature_gram_lambda": ax4l,
+        "train_loss": ax4r,
     }
     titles = {
-        "jacobian_dist_hist_co": "jacobian distance from init (cosine)",
-        "nn_to_lin_dist_co": "distance between nn params and lin params (cosine)",
+        "jacobian_dist_l2": "relative Jacobian distance from init (l2)",
+        "jacobian_dist_co": "jacobian distance from init (cosine)",
+        "nn_to_lin_dist_l2": "relative distance of nn params from lin params (l2)",
+        "nn_to_lin_dist_co": "distance of nn params from lin params (cosine)",
+        "feat_rel_dist": "relative feature distance from init (l2)",
+        "feat_cos_dist": "feature distance from init (cosine)",
+        "feature_gram_lambda": "λ_min of activation's Gram matrix",
         "train_loss": "train loss",
     }
-    log_axes = set()
+    log_axes = set("jacobian_dist_l2", "nn_to_lin_dist_l2", "feat_rel_dist")
 
     # ------------------------ actual plotting ------------------------ #  
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
@@ -110,8 +125,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
         jac_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
         co_mean = jac_arr[:, :, 1].mean(axis=0)
         co_std  = jac_arr[:, :, 1].std(axis=0)
-        _plot_band(axes["jacobian_dist_hist_co"], x, co_mean, co_std, label=run_name, color=c)
-
+        _plot_band(axes["jacobian_dist_co"], x, co_mean, co_std, label=run_name, color=c)
         
         # param distances
         param_histories = [np.asarray(r["nn_lin_param_dist_hist"]) for r in run_results_by_seed.values()]
@@ -119,6 +133,18 @@ def plot_ex1_multiseed(results, epochs, track_every):
         co_mean = param_arr[:, :, 1].mean(axis=0)
         co_std  = param_arr[:, :, 1].std(axis=0)
         _plot_band(axes["nn_to_lin_dist_co"], x, co_mean, co_std, label=run_name, color=c)
+
+        # relative feature distance
+        mean, std = _mean_std_across_seeds(run_results_by_seed, "feat_rel_dist_hist")
+        _plot_band(axes["feat_rel_dist"], x, mean, std, label=run_name, color=c)
+
+        # relative feature distance
+        mean, std = _mean_std_across_seeds(run_results_by_seed, "feat_cos_dist_hist")
+        _plot_band(axes["feat_cos_dist"], x, mean, std, label=run_name, color=c)
+
+        # min eigenvalue of Gram(A_t)
+        mean, std = _mean_std_across_seeds(run_results_by_seed, "feature_gram_lambda_hist")
+        _plot_band(axes["feature_gram_lambda"], x, mean, std, label=run_name, color=c)
 
         # accuracy/loss (nonlinear vs linearized)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
