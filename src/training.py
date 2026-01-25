@@ -2,6 +2,7 @@ import numpy as np
 import random
 import torch
 
+from .data import load_digits_data
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
 from .langevin import langevin_step
 from .linearized import (
