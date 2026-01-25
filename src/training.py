@@ -177,6 +177,7 @@ def train(
 def train_multiseed(
     seeds,
     n,
+    random_labels,
     eta,
     epochs,
     beta,
@@ -203,7 +204,7 @@ def train_multiseed(
         np.random.seed(run_seed)
         random.seed(run_seed)
 
-        data = load_digits_data(n=n, random_labels=False, device=device, seed=run_seed)
+        data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
 
         metrics = train(
             data=data,
