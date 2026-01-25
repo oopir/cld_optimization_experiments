@@ -115,9 +115,9 @@ def plot_ex1_multiseed(results, epochs, track_every):
         
         # param distances
         param_histories = [np.asarray(r["nn_lin_param_dist_hist"]) for r in run_results_by_seed.values()]
-        param_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
-        co_mean = jac_arr[:, :, 1].mean(axis=0)
-        co_std  = jac_arr[:, :, 1].std(axis=0)
+        param_arr = np.stack(param_histories, axis=0)  # (n_seeds, T, 2)
+        co_mean = param_arr[:, :, 1].mean(axis=0)
+        co_std  = param_arr[:, :, 1].std(axis=0)
         _plot_band(axes["nn_to_lin_dist_co"], x, co_mean, co_std, label=run_name, color=c)
 
         # accuracy/loss (nonlinear vs linearized)
