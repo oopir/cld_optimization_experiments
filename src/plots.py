@@ -277,7 +277,7 @@ def plot_ex2_multiseed(results, epochs, track_every):
     plt.show()
 
 def plot_1d_regression_curves(x_plot, curves_by_beta):
-    data = load_1d_regression_data()
+    data = load_1d_regression_data(shuffle=False)
     x_plot_np = x_plot.cpu().numpy().ravel()
     X_train_np = data["X_train"].cpu().numpy().ravel()
     y_train_np = data["y_train"].cpu().numpy().ravel()
