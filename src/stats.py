@@ -82,7 +82,7 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
         "sigma_max_v": sigma_max_v,
         "feat_rel_dist": feat_rel_dist,
         "feat_cos_dist": feat_cos_dist,
-        "feat_gram_min": feat_gram_lambda,
+        "feat_gram_lambda": feat_gram_lambda,
     }
 
 @torch.no_grad()
