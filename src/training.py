@@ -2,7 +2,7 @@ import numpy as np
 import random
 import torch
 
-from .data import load_digits_data
+from .data import load_digits_data, load_1d_regression_data
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
 from .langevin import langevin_step
 from .linearized import (
@@ -282,7 +282,6 @@ def train_and_return_model(
 def get_1d_regression_curves_for_betas(
     x_plot,
     seeds, 
-    data, 
     eta, 
     epochs, 
     betas, 
@@ -299,6 +298,8 @@ def get_1d_regression_curves_for_betas(
         fs = []
         for seed in seeds:
             print(f"  seed={seed}")
+            data = load_1d_regression_data(device=device)
+
             model = train_and_return_model(
                 seed=seed, 
                 data=data, 

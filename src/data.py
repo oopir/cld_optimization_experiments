@@ -48,6 +48,10 @@ def load_1d_regression_data(device="cpu"):
     X = np.asarray(X_values, dtype=np.float32).reshape(-1, 1)
     y = np.asarray(y_values, dtype=np.float32)
 
+    idx = np.random.permutation(len(X))
+    X = X[idx]
+    y = y[idx]
+
     X_train, X_test, y_train, y_test = X, X, y, y
 
     X_train = torch.tensor(X_train, device=device)

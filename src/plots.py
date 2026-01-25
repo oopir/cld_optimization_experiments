@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
+from .data import load_1d_regression_data
+
 def _mean_std_across_seeds(results_by_seed, key):
     histories = [np.asarray(r[key]) for r in results_by_seed.values()]
     arr = np.stack(histories, axis=0)  # (n_seeds, T)
@@ -274,7 +276,8 @@ def plot_ex2_multiseed(results, epochs, track_every):
     plt.tight_layout()
     plt.show()
 
-def plot_1d_regression_curves(data, x_plot, curves_by_beta):
+def plot_1d_regression_curves(x_plot, curves_by_beta):
+    data = load_1d_regression_data()
     x_plot_np = x_plot.cpu().numpy().ravel()
     X_train_np = data["X_train"].cpu().numpy().ravel()
     y_train_np = data["y_train"].cpu().numpy().ravel()
