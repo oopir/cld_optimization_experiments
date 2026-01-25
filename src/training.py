@@ -15,6 +15,7 @@ from .stats import (
     LIN_METRIC_NAMES,
     get_stats,
     get_linear_stats,
+    get_nn_lin_param_dist,
     compute_jacobian_dist,
     compute_dataset_ntk_drift,
     compute_dist_bound_under_GF,
@@ -66,7 +67,8 @@ def _init_metrics(track_jacobian, use_linearized):
     # if use_linearized:
     for name in LIN_METRIC_NAMES:
         metrics[f"{name}_hist"] = []
-    metrics["NN_to_lin_hist"] = []
+    metrics["nn_to_lin_hist"] = []
+    metrics["nn_lin_param_dist_hist"] = []
     return metrics
 
 def train(
@@ -128,10 +130,14 @@ def train(
 
             if use_linearized:
                 lin_stats = get_linear_stats(model, base_params_dict, lin_params, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0, data)
+                
                 for name in LIN_METRIC_NAMES:
                     metrics[f"{name}_hist"].append(lin_stats[name])
-                NN_to_lin_dist = torch.sqrt(sum((p-q).pow(2).sum() for p, q in zip(params, lin_params))).item()
-                metrics["NN_to_lin_hist"].append(NN_to_lin_dist)
+                nn_to_lin_dist = torch.sqrt(sum((p-q).pow(2).sum() for p, q in zip(params, lin_params))).item()
+                metrics["nn_to_lin_hist"].append(NN_to_lin_dist)
+                
+                nn_lin_param_dist = get_nn_lin_param_dist(params, lin_params)
+                metrics["nn_lin_param_dist_hist"].append(NN_lin_param_dist)
 
             if epoch % print_every == 1:
                 print(

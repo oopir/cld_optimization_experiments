@@ -5,6 +5,13 @@ import torch.nn.functional as F
 from .model import loss_fn
 from .linearized import linearized_forward, compute_param_jacobians
 
+'''
+metrics I want:
+- cosine distance between NN params and linear params
+- check what metrics were important to him beforehand
+- check the metrics from that paper daniel sent yesterday
+'''
+
 BASE_METRIC_NAMES = [
     "train_loss",
     "train_acc",
@@ -104,6 +111,27 @@ def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_nor
         "lin_param_norm_fc1": fc1_norm / (fc1_norm0 + 1e-12),
         "lin_param_norm_fc2": fc2_norm / (fc2_norm0 + 1e-12),
     }
+
+@torch.no_grad()
+def get_nn_lin_param_dist(params, lin_params, eps=1e-12):
+    # compute cosine distance between NN params and lin params
+    total_sq = 0
+    dot      = 0
+    norm_n   = 0
+    norm_l   = 0
+    for pn, pl in zip(params, lin_params):
+        total_sq += float(((pn - pl)**2).sum().item())
+        dot += float((pn * pl).sum().item())
+        norm_n += float((pn**2).sum().item())
+        norm_l += float((pl**2).sum().item())
+
+    l2_dist = math.sqrt(total_sq)
+
+    cos_sim = dot / ((math.sqrt(norm_n) * math.sqrt(norm_l)) + eps)
+    cos_sim = max(-1.0, min(1.0, cos_sim)) # handles numerical instability that arises on the regression data
+    cos_dist = 1.0 - cos_sim
+
+    return l2_dist, cos_dist
 
 # this part should *not* be inside "no_grad" blocks/functions
 def compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq=None, eps=1e-12):
