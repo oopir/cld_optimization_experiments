@@ -87,9 +87,9 @@ def plot_ex1_multiseed(results, epochs, track_every):
     ax2l = plt.subplot(gs[1, 0])   # second row left
 
     axes = {
-        "jacobian_dist_hist_co": ax1l
+        "jacobian_dist_hist_co": ax1l,
         "nn_to_lin_dist_co": ax1r,
-        "train_loss": ax2l
+        "train_loss": ax2l,
     }
     titles = {
         "jacobian_dist_hist_co": "jacobian distance from init (cosine)",
