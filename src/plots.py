@@ -135,7 +135,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
         param_arr = np.stack(param_histories, axis=0)  # (n_seeds, T, 2)
         l2_mean = param_arr[:, :, 0].mean(axis=0)
         l2_std  = param_arr[:, :, 0].std(axis=0)
-        _plot_band(axes["nn_to_lin_dist_cl2"], x, l2_mean, l2_std, label=run_name, color=c)
+        _plot_band(axes["nn_to_lin_dist_l2"], x, l2_mean, l2_std, label=run_name, color=c)
         co_mean = param_arr[:, :, 1].mean(axis=0)
         co_std  = param_arr[:, :, 1].std(axis=0)
         _plot_band(axes["nn_to_lin_dist_co"], x, co_mean, co_std, label=run_name, color=c)
