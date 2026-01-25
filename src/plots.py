@@ -113,7 +113,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
         "feat_gram_lambda": "λ_min of activation's Gram matrix",
         "train_loss": "train loss",
     }
-    log_axes = {"jacobian_dist_l2", "nn_to_lin_dist_l2", "feat_rel_dist"}
+    log_axes = {"jacobian_dist_l2", "nn_to_lin_dist_l2", "feat_rel_dist", "feat_gram_lambda"}
 
     # ------------------------ actual plotting ------------------------ #  
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
