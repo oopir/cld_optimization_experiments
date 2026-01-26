@@ -127,6 +127,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
         jac_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
         l2_mean = jac_arr[:, :, 0].mean(axis=0)
         l2_std  = jac_arr[:, :, 0].std(axis=0)
+        l2_mean[0] = max(l2_mean[0], 1e-12)
         _plot_band(axes["jacobian_dist_l2"], x, l2_mean, l2_std, label=run_name, color=c)
         co_mean = jac_arr[:, :, 1].mean(axis=0)
         co_std  = jac_arr[:, :, 1].std(axis=0)
@@ -137,6 +138,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
         param_arr = np.stack(param_histories, axis=0)  # (n_seeds, T, 2)
         l2_mean = param_arr[:, :, 0].mean(axis=0)
         l2_std  = param_arr[:, :, 0].std(axis=0)
+        l2_mean[0] = max(l2_mean[0], 1e-12)
         _plot_band(axes["nn_to_lin_dist_l2"], x, l2_mean, l2_std, label=run_name, color=c)
         co_mean = param_arr[:, :, 1].mean(axis=0)
         co_std  = param_arr[:, :, 1].std(axis=0)
@@ -144,9 +146,10 @@ def plot_ex1_multiseed(results, epochs, track_every):
 
         # relative feature distance
         mean, std = _mean_std_across_seeds(run_results_by_seed, "feat_rel_dist_hist")
+        mean[0] = max(mean[0], 1e-12)
         _plot_band(axes["feat_rel_dist"], x, mean, std, label=run_name, color=c)
 
-        # relative feature distance
+        # cosine feature distance
         mean, std = _mean_std_across_seeds(run_results_by_seed, "feat_cos_dist_hist")
         _plot_band(axes["feat_cos_dist"], x, mean, std, label=run_name, color=c)
 
@@ -163,6 +166,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
     for k, ax in axes.items():
         ax.set_title(titles[k])
         ax.set_xlabel("epoch")
+        ax.set_xscale("log")
         if k in log_axes:
             ax.set_yscale("log")
         ax.legend()

@@ -247,8 +247,6 @@ def _train_multiseed_worker(
 
     return run_seed, metrics
 
-
-
 def train_multiseed(
     dataset,
     seeds,
@@ -278,7 +276,6 @@ def train_multiseed(
         return results
 
     args_except_seeds = (
-        dataset,
         n,
         random_labels,
         eta,
@@ -325,7 +322,7 @@ def train_multiseed(
     if len(seeds) == 1:
         # Sequential fast path (keeps old behavior for single seed)
         dev_str = (base_device if gpu_ids[0] is None else f"cuda:{gpu_ids[0]}")
-        run_seed, metrics = _train_multiseed_worker(seeds[0], dev_str, *args_except_seeds)
+        run_seed, metrics = _train_multiseed_worker(dataset, seeds[0], dev_str, *args_except_seeds)
         results[run_seed] = metrics
         return results
 
@@ -342,7 +339,7 @@ def train_multiseed(
                 dev_str = base_device
             else:
                 dev_str = f"cuda:{gpu_ids[i % len(gpu_ids)]}"  # round-robin over GPUs
-            futures.append(pool.submit(_train_multiseed_worker, run_seed, dev_str, *args_except_seeds))
+            futures.append(pool.submit(_train_multiseed_worker, dataset, run_seed, dev_str, *args_except_seeds))
 
         for fut in futures:
             run_seed, metrics = fut.result()
