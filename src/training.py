@@ -356,6 +356,7 @@ def train_and_return_model(
     regularization_scale=1.0,
     device="cpu",
     print_every=100,
+    target_loss=None,
 ):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -379,8 +380,15 @@ def train_and_return_model(
         loss = loss_fn(outputs, y_train)
         loss.backward()
         langevin_step(params,lam_tensors,beta=beta,eta=eta,regularization_scale=regularization_scale)
+        # if epoch % print_every == 0:
+        #     print(f"    epoch = {epoch:5} | loss = {loss:.2}")
+        loss_val = loss.item()
         if epoch % print_every == 0:
-            print(f"    epoch = {epoch:5} | loss = {loss:.2}")
+            print(f"    epoch = {epoch:5} | loss = {loss_val:.2}")
+        if (target_loss is not None) and (loss_val <= target_loss):
+            if print_every:
+                print(f"    early stopping at epoch = {epoch:5} | loss = {loss_val:.3g}")
+            break
 
     return model
 
@@ -393,7 +401,8 @@ def get_1d_regression_curves_for_betas(
     init_type="standard",
     regularization_scale=1.0, 
     device="cpu", 
-    print_every=100
+    print_every=100,
+    target_loss=None,
 ):
     curves = {}
     m_values = [int(min(1e05, beta * np.log(beta))) for beta in betas]
@@ -415,7 +424,8 @@ def get_1d_regression_curves_for_betas(
                 init_type=init_type,
                 regularization_scale=regularization_scale, 
                 device=device, 
-                print_every=print_every
+                print_every=print_every,
+                target_loss=target_loss,
             )
             with torch.no_grad():
                 f = model(x_plot).cpu().numpy().ravel()
@@ -434,6 +444,7 @@ def get_1d_regression_curves_for_alphas(
     regularization_scale=0.0,
     device="cpu",
     print_every=100,
+    target_loss=None,
 ):
     curves = {}
     m = 10000  # same width rule as before
@@ -459,6 +470,7 @@ def get_1d_regression_curves_for_alphas(
                 device=device,
                 print_every=print_every,
                 alpha=alpha,
+                target_loss=target_loss,
             )
             with torch.no_grad():
                 f = model(x_plot).cpu().numpy().ravel()
