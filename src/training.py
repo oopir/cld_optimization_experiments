@@ -407,6 +407,7 @@ def get_1d_regression_curves_for_betas(
     curves = {}
     m_values = [int(min(1e05, beta * np.log(beta))) for beta in betas]
     m_max = max(m_values)
+    m_max = 10000  # hardcoded until replication works
     for beta in betas:
         print(f"beta={beta:.0e}, m={m_max:.2e}")
         fs = []
@@ -447,7 +448,7 @@ def get_1d_regression_curves_for_alphas(
     target_loss=None,
 ):
     curves = {}
-    m = 10000  # same width rule as before
+    m = 10000  # hardcoded until replication works
     for alpha in alphas:
         print(f"alpha={alpha:.1e}, m={m:.2e}")
         eta_alpha = min(1e-2, eta / alpha)
