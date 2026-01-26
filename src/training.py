@@ -94,6 +94,7 @@ def train(
     print_every=100,
     init_model_state_dict=None, 
     start_model_state_dict=None,
+    start_lin_params=None,
 ):
 
     # --------- init environment & compute values at init for stats -------- #
@@ -113,6 +114,9 @@ def train(
             base_params_dict, lin_params, lin_lam_tensors, lin_params0, 
             lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0
         ) = _init_linearization_vars(model, params0, lam_tensors)
+        if start_lin_params is not None:
+            for p, p_prev in zip(lin_params, start_lin_params):
+                p.data.copy_(p_prev.to(device=p.device, dtype=p.dtype))
 
     if track_jacobian:
         model_at_init, X_probe, jac_init, jac_init_norm_sq = \
@@ -205,6 +209,8 @@ def train(
 
     metrics["model_state_dict"] = {k: v.detach().cpu() for k, v in model.state_dict().items()}
     metrics["init_model_state_dict"] = init_state_for_metrics
+    if use_linearized:
+        metrics["lin_params_state"] = [p.detach().cpu() for p in lin_params]
 
 
     return metrics
@@ -230,6 +236,7 @@ def _train_multiseed_worker(
     print_every,
     init_model_state_dicts=None, 
     start_model_state_dicts=None,
+    start_lin_params_dicts=None,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -252,6 +259,10 @@ def _train_multiseed_worker(
     start_state = None
     if start_model_state_dicts is not None:
         start_state = start_model_state_dicts.get(run_seed)
+    
+    start_lin_params = None
+    if start_lin_params_dicts is not None:
+        start_lin_params = start_lin_params_dicts.get(run_seed)
 
     metrics = train(
         data=data,
@@ -271,6 +282,7 @@ def _train_multiseed_worker(
         print_every=print_every,
         init_model_state_dict=init_state,
         start_model_state_dict=start_state,
+        start_lin_params=start_lin_params,
     )
 
     return run_seed, metrics
@@ -297,6 +309,7 @@ def train_multiseed(
     gpu_ids=None,  
     init_model_state_dicts=None,
     start_model_state_dicts=None,
+    start_lin_params_dicts=None, 
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -323,6 +336,7 @@ def train_multiseed(
         print_every,
         init_model_state_dicts,
         start_model_state_dicts,
+        start_lin_params_dicts,  
     )
 
     # create a list of gpu ids & set gpus to spawn
