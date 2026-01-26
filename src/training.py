@@ -2,6 +2,9 @@ import numpy as np
 import random
 import torch
 
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
+
 from .data import load_digits_data, load_1d_regression_data
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
 from .langevin import langevin_step
@@ -189,6 +192,56 @@ def train(
 
     return metrics
 
+def _train_multiseed_worker(
+    run_seed,
+    device,
+    n,
+    random_labels,
+    eta,
+    epochs,
+    beta,
+    m,
+    init_type,
+    lam_fc1,
+    lam_fc2,
+    regularization_scale,
+    use_linearized,
+    track_jacobian,
+    jac_probe_size,
+    track_every,
+    print_every,
+):
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    torch.manual_seed(run_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(run_seed)
+    np.random.seed(run_seed)
+    random.seed(run_seed)
+
+    data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
+
+    metrics = train(
+        data=data,
+        eta=eta,
+        epochs=epochs,
+        beta=beta,
+        m=m,
+        init_type=init_type,
+        lam_fc1=lam_fc1,
+        lam_fc2=lam_fc2,
+        regularization_scale=regularization_scale,
+        use_linearized=use_linearized,
+        track_jacobian=track_jacobian,
+        jac_probe_size=jac_probe_size,
+        device=device,
+        track_every=track_every,
+        print_every=print_every,
+    )
+
+    return run_seed, metrics
+
 def train_multiseed(
     seeds,
     n,
@@ -207,41 +260,86 @@ def train_multiseed(
     device="cpu",
     track_every=1,
     print_every=100,
+    gpu_ids=None,  
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     
     results = {}
+    if not seeds:
+        return results
 
-    for run_seed in seeds:
-        torch.manual_seed(run_seed)
-        torch.cuda.manual_seed_all(run_seed)
-        np.random.seed(run_seed)
-        random.seed(run_seed)
+    args_except_seeds = (
+        n,
+        random_labels,
+        eta,
+        epochs,
+        beta,
+        m,
+        init_type,
+        lam_fc1,
+        lam_fc2,
+        regularization_scale,
+        use_linearized,
+        track_jacobian,
+        jac_probe_size,
+        track_every,
+        print_every,
+    )
 
-        data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
+    # create a list of gpu ids & set gpus to spawn
+    base_device = device
+    if gpu_ids is None:
+        if device.startswith("cuda") and torch.cuda.is_available():
+            if ":" in device:
+                # if user asks for an explicit device, e.g. "cuda:1"
+                idx = int(device.split(":", 1)[1])
+                gpu_ids = [idx]
+            else:
+                num_gpus = torch.cuda.device_count()
+                gpu_ids = list(range(num_gpus)) if num_gpus > 0 else [0]
 
-        metrics = train(
-            data=data,
-            eta=eta,
-            epochs=epochs,
-            beta=beta,
-            m=m,
-            init_type=init_type,
-            lam_fc1=lam_fc1,
-            lam_fc2=lam_fc2,
-            regularization_scale=regularization_scale,
-            use_linearized=use_linearized,
-            track_jacobian=track_jacobian,
-            jac_probe_size=jac_probe_size,
-            device=device,
-            track_every=track_every,
-            print_every=print_every,
-        )
+            try:
+                mp.set_start_method("spawn", force=True)
+            except RuntimeError:
+                pass # already set, fine
+        else:
+            gpu_ids = [None]
+    else:
+        # user provided the GPU indices once for the whole experiment
+        if device.startswith("cuda") and torch.cuda.is_available():
+            try:
+                mp.set_start_method("spawn", force=True)
+            except RuntimeError:
+                pass
+
+    if len(seeds) == 1:
+        # Sequential fast path (keeps old behavior for single seed)
+        dev_str = (base_device if gpu_ids[0] is None else f"cuda:{gpu_ids[0]}")
+        run_seed, metrics = _train_multiseed_worker(seeds[0], dev_str, *args_except_seeds)
         results[run_seed] = metrics
+        return results
+
+    # determine max workers
+    if gpu_ids[0] is None:
+        max_workers = len(seeds)
+    else:
+        max_workers = min(len(seeds), len(gpu_ids))
+
+    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+        futures = []
+        for i, run_seed in enumerate(seeds):
+            if gpu_ids[0] is None:
+                dev_str = base_device
+            else:
+                dev_str = f"cuda:{gpu_ids[i % len(gpu_ids)]}"  # round-robin over GPUs
+            futures.append(pool.submit(_train_multiseed_worker, run_seed, dev_str, *args_except_seeds))
+
+        for fut in futures:
+            run_seed, metrics = fut.result()
+            results[run_seed] = metrics
 
     return results
-
 
 def train_and_return_model(
     seed,
