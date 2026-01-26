@@ -194,6 +194,7 @@ def train(
     return metrics
 
 def _train_multiseed_worker(
+    dataset,
     run_seed,
     device,
     n,
@@ -221,7 +222,10 @@ def _train_multiseed_worker(
     np.random.seed(run_seed)
     random.seed(run_seed)
 
-    data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
+    if dataset == "digits":
+        data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
+    else:
+        data = load_1d_regression_data(device=device)
 
     metrics = train(
         data=data,
@@ -243,7 +247,10 @@ def _train_multiseed_worker(
 
     return run_seed, metrics
 
+
+
 def train_multiseed(
+    dataset,
     seeds,
     n,
     random_labels,
@@ -271,6 +278,7 @@ def train_multiseed(
         return results
 
     args_except_seeds = (
+        dataset,
         n,
         random_labels,
         eta,
