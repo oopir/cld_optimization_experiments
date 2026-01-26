@@ -107,7 +107,12 @@ def train(
             _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, device, model, X_train, jac_probe_size)
 
     with torch.no_grad():
-        A0 = torch.tanh(X_train @ model.fc1.weight.T)
+        if model.act == 'relu':
+            A0 = torch.relu(X_train @ model.fc1.weight.T)
+        elif model.act == 'tanh':
+            A0 = torch.tanh(X_train @ model.fc1.weight.T)
+        else:
+            raise ValueError(f"Tracking of feature distance does not support activation '{model.act}'.")
         A0_norm = A0.norm().item()
 
     metrics = _init_metrics(track_jacobian, use_linearized)
@@ -246,6 +251,7 @@ def train_and_return_model(
     beta,
     m,
     init_type="standard",
+    alpha=0.1,
     lam_fc1=None,
     lam_fc2=None,
     regularization_scale=1.0,
@@ -262,7 +268,7 @@ def train_and_return_model(
     d_in = data["d_in"]
     d_out = data["d_out"]
 
-    model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, with_bias=True, init_type=init_type).to(device)
+    model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, with_bias=True, init_type=init_type, alpha=alpha, act="relu").to(device)
     params, lam_tensors = make_lambda_like_params(model, init_type, lam_fc1, lam_fc2)
 
     for epoch in range(epochs):
@@ -316,4 +322,47 @@ def get_1d_regression_curves_for_betas(
                 f = model(x_plot).cpu().numpy().ravel()
             fs.append(f)
         curves[beta] = np.stack(fs, axis=0)  # (n_seeds, n_grid)
+    return curves
+
+def get_1d_regression_curves_for_alphas(
+    x_plot,
+    seeds,
+    eta,
+    epochs,
+    alphas,
+    beta,
+    init_type="alpha",
+    regularization_scale=0.0,
+    device="cpu",
+    print_every=100,
+):
+    curves = {}
+    m = int(min(1e05, beta * np.log(beta)))  # same width rule as before
+    for alpha in alphas:
+        print(f"alpha={alpha:.1e}, m={m:.2e}")
+        eta_alpha = min(1e-2, eta / alpha)
+        print(f"eta for {alpha} is {eta_alpha:.2e}")
+        fs = []
+        for seed in seeds:
+            print(f"  seed={seed}")
+            data = load_1d_regression_data(device=device)
+
+            # same seed + init_type="alpha" ⇒ same base w0; alpha rescales it
+            model = train_and_return_model(
+                seed=seed,
+                data=data,
+                eta=eta_alpha,
+                epochs=epochs,
+                beta=beta,
+                m=m,
+                init_type=init_type,
+                regularization_scale=regularization_scale,
+                device=device,
+                print_every=print_every,
+                alpha=alpha,
+            )
+            with torch.no_grad():
+                f = model(x_plot).cpu().numpy().ravel()
+            fs.append(f)
+        curves[alpha] = np.stack(fs, axis=0)
     return curves

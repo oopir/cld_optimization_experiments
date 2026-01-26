@@ -2,31 +2,35 @@ import torch
 import torch.nn as nn
 
 class TwoLayerNet(nn.Module):
-    def __init__(self, d_in, m, d_out=10, with_bias=False, init_type="standard"):
+    def __init__(self, d_in, m, d_out=10, with_bias=False, init_type="standard", alpha=0.1, act="tanh"):
         super().__init__()
         self.d_in = d_in
         self.m = m
         self.d_out = d_out
         self.init_type = init_type
-        self.alpha = 0.1  # hardcoded scale factor (used only with some init types)
+        self.alpha = alpha
         self.fc1 = nn.Linear(d_in, m, bias=with_bias)
         self.fc2 = nn.Linear(m, d_out, bias=with_bias)
+
+        if act not in ["tanh", "relu"]:
+            raise ValueError(f"Unknown act='{self.act}' Use 'tanh' or 'relu'.")
+        self.act = act
 
         #purposefully located here so "alpha" scaling will happen after bias init
         if with_bias:
             with torch.no_grad():
-                self.fc1.bias.normal_(0.0, nn.init.calculate_gain("tanh"))
+                self.fc1.bias.normal_(0.0, nn.init.calculate_gain(self.act))
                 self.fc2.bias.normal_(0.0, nn.init.calculate_gain("linear"))
 
         if init_type == "standard":
-            torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity="tanh")
+            torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity=self.act)
             torch.nn.init.kaiming_normal_(self.fc2.weight, mode="fan_in", nonlinearity="linear")
         elif init_type == "mean-field":
             with torch.no_grad():
-                self.fc1.weight.normal_(0.0, nn.init.calculate_gain("tanh") / d_in)
+                self.fc1.weight.normal_(0.0, nn.init.calculate_gain(self.act) / d_in)
                 self.fc2.weight.normal_(0.0, nn.init.calculate_gain("linear") / m)
         elif init_type == "alpha":
-            torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity="tanh")
+            torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity=self.act)
             torch.nn.init.kaiming_normal_(self.fc2.weight, mode="fan_in", nonlinearity="linear")
 
             with torch.no_grad():
@@ -41,7 +45,12 @@ class TwoLayerNet(nn.Module):
 
     def forward(self, x):
         x = self.fc1(x)
-        x = torch.tanh(x)
+        if self.act == "tanh":
+            x = torch.tanh(x)
+        elif self.act == "relu":
+            x = torch.relu(x)
+        else:
+            raise ValueError(f"Model's 'forward' does not support activation '{self.act}'.")
         x = self.fc2(x)
         return x
 
@@ -54,7 +63,7 @@ def loss_fn(outputs, targets):
 # This matches diag(lambda) theta as elementwise shrink.
 # ---------------------------------------------------------------------------
 def make_lambda_like_params(model, init_type, lam_fc1, lam_fc2, lam_bi1=None, lam_bi2=None):
-    tanh_gain_sq = nn.init.calculate_gain("tanh")**2
+    tanh_gain_sq = nn.init.calculate_gain(self.act)**2
     lin_gain_sq  = nn.init.calculate_gain("linear")**2
 
     if lam_fc1 is None or lam_fc2 is None:
