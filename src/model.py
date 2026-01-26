@@ -13,7 +13,7 @@ class TwoLayerNet(nn.Module):
         self.fc2 = nn.Linear(m, d_out, bias=with_bias)
 
         if act not in ["tanh", "relu"]:
-            raise ValueError(f"Unknown act='{self.act}' Use 'tanh' or 'relu'.")
+            raise ValueError(f"Unknown act='{act}' Use 'tanh' or 'relu'.")
         self.act = act
 
         #purposefully located here so "alpha" scaling will happen after bias init
@@ -63,7 +63,7 @@ def loss_fn(outputs, targets):
 # This matches diag(lambda) theta as elementwise shrink.
 # ---------------------------------------------------------------------------
 def make_lambda_like_params(model, init_type, lam_fc1, lam_fc2, lam_bi1=None, lam_bi2=None):
-    tanh_gain_sq = nn.init.calculate_gain(self.act)**2
+    tanh_gain_sq = nn.init.calculate_gain(model.act)**2
     lin_gain_sq  = nn.init.calculate_gain("linear")**2
 
     if lam_fc1 is None or lam_fc2 is None:

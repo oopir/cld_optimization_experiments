@@ -337,7 +337,7 @@ def get_1d_regression_curves_for_alphas(
     print_every=100,
 ):
     curves = {}
-    m = int(min(1e05, beta * np.log(beta)))  # same width rule as before
+    m = 10000  # same width rule as before
     for alpha in alphas:
         print(f"alpha={alpha:.1e}, m={m:.2e}")
         eta_alpha = min(1e-2, eta / alpha)
