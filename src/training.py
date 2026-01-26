@@ -25,9 +25,11 @@ from .stats import (
     estimate_loss_floor
 )
 
-def _init_base_model_vars(d_in, d_out, m, init_type, device, lam_fc1, lam_fc2):
+def _init_base_model_vars(d_in, d_out, m, init_type, device, lam_fc1, lam_fc2, init_model_state_dict=None):
 
     model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, init_type=init_type).to(device)
+    if init_model_state_dict is not None:
+        model.load_state_dict(init_model_state_dict)
     params, lam_tensors = make_lambda_like_params(model, init_type, lam_fc1=lam_fc1, lam_fc2=lam_fc2)
 
     params0 = [p.detach().clone() for p in params]
@@ -90,6 +92,8 @@ def train(
     device="cpu",
     track_every=1,
     print_every=100,
+    init_model_state_dict=None, 
+    start_model_state_dict=None,
 ):
 
     # --------- init environment & compute values at init for stats -------- #
@@ -97,7 +101,12 @@ def train(
     d = X_train.shape[1]
 
     model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0 = \
-        _init_base_model_vars(data["d_in"], data["d_out"], m, init_type, device, lam_fc1, lam_fc2)
+        _init_base_model_vars(data["d_in"], data["d_out"], m, init_type, device, lam_fc1, lam_fc2, init_model_state_dict)
+
+    if init_model_state_dict is not None:
+        init_state_for_metrics = {k: v.detach().cpu() for k, v in init_model_state_dict.items()}
+    else:
+        init_state_for_metrics = {k: v.detach().cpu() for k, v in model.state_dict().items()}
 
     if use_linearized:
         (
@@ -119,6 +128,9 @@ def train(
         A0_norm = A0.norm().item()
 
     metrics = _init_metrics(track_jacobian, use_linearized)
+
+    if start_model_state_dict is not None:
+        model.load_state_dict(start_model_state_dict)
 
     print(f"training starts for {device}...")
     stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
@@ -191,6 +203,10 @@ def train(
     metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v)
     metrics["loss_floor"] = estimate_loss_floor(X_train, beta, m=m, device=device)
 
+    metrics["model_state_dict"] = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+    metrics["init_model_state_dict"] = init_state_for_metrics
+
+
     return metrics
 
 def _train_multiseed_worker(
@@ -212,6 +228,8 @@ def _train_multiseed_worker(
     jac_probe_size,
     track_every,
     print_every,
+    init_model_state_dicts=None, 
+    start_model_state_dicts=None,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -226,6 +244,14 @@ def _train_multiseed_worker(
         data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
     else:
         data = load_1d_regression_data(device=device)
+
+    init_state = None
+    if init_model_state_dicts is not None:
+        init_state = init_model_state_dicts.get(run_seed)
+
+    start_state = None
+    if start_model_state_dicts is not None:
+        start_state = start_model_state_dicts.get(run_seed)
 
     metrics = train(
         data=data,
@@ -243,6 +269,8 @@ def _train_multiseed_worker(
         device=device,
         track_every=track_every,
         print_every=print_every,
+        init_model_state_dict=init_state,
+        start_model_state_dict=start_state,
     )
 
     return run_seed, metrics
@@ -267,6 +295,8 @@ def train_multiseed(
     track_every=1,
     print_every=100,
     gpu_ids=None,  
+    init_model_state_dicts=None,
+    start_model_state_dicts=None,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -291,6 +321,8 @@ def train_multiseed(
         jac_probe_size,
         track_every,
         print_every,
+        init_model_state_dicts,
+        start_model_state_dicts,
     )
 
     # create a list of gpu ids & set gpus to spawn

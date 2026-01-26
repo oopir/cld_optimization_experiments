@@ -166,7 +166,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
     for k, ax in axes.items():
         ax.set_title(titles[k])
         ax.set_xlabel("epoch")
-        ax.set_xscale("log")
+        # ax.set_xscale("log")
         if k in log_axes:
             ax.set_yscale("log")
         ax.legend()
