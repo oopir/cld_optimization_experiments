@@ -120,7 +120,7 @@ def train(
 
     metrics = _init_metrics(track_jacobian, use_linearized)
 
-    print("training starts...")
+    print(f"training starts for {device}...")
     stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
     sup_sigma_max_v = stats["sigma_max_v"]
     # print(f"epoch {0:8d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
@@ -153,6 +153,7 @@ def train(
 
             if epoch % print_every == 1:
                 print(
+                    f"device {device} | "
                     f"epoch {epoch:8d} | "
                     f"loss {stats['train_loss']:.4f} (lin: {lin_stats['lin_train_loss']:.4f}) | "
                     f"train acc {stats['train_acc']:.3f} (lin: {lin_stats['lin_train_acc']:.4f}) | "
