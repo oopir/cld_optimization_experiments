@@ -27,16 +27,25 @@ LIN_METRIC_NAMES = [
     "lin_param_norm_fc2",
 ]
 
+def _get_targets_for_loss(outputs, y, y_one_hot=None):
+    """
+    Same convention as in training: make targets match outputs for loss.
+    """
+    if y_one_hot is not None:
+        return y_one_hot
+
+    if outputs.ndim == 2 and outputs.size(1) == 1 and y.ndim == 1:
+        return y.unsqueeze(1)
+
+    return y
+
 @torch.no_grad()
 def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data):
     X_train = data["X_train"]
     X_test  = data["X_test"]
     y_train = data["y_train"]
     y_test  = data["y_test"]
-    if "y_train_one_hot" in data:
-        y_train_one_hot = data["y_train_one_hot"]
-    else:
-        y_train_one_hot = None
+    y_train_one_hot = data.get("y_train_one_hot", None)
 
     train_outputs = model(X_train)
     pred_train = train_outputs.argmax(dim=1)
@@ -46,10 +55,8 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
     pred_test = test_outputs.argmax(dim=1)
     test_acc = (pred_test == y_test).float().mean().item()
 
-    if y_train_one_hot is not None:
-        train_loss = loss_fn(train_outputs, y_train_one_hot).item()
-    else:
-        train_loss = loss_fn(train_outputs, y_train).item()
+    targets = _get_targets_for_loss(train_outputs, y_train, y_train_one_hot)
+    train_loss = loss_fn(train_outputs, targets).item()
 
     param_dist = torch.sqrt(sum((p-p0).pow(2).sum() for p, p0 in zip(params, params0))).item()
     param_norm = torch.sqrt(sum(p.pow(2).sum() for p in params)).item()
@@ -58,7 +65,12 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
 
     sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
 
-    A_t = torch.tanh(model.fc1(X_train))
+    if model.act == "relu":
+        A_t = torch.relu(model.fc1(X_train))
+    elif model.act == "tanh":
+        A_t = torch.tanh(model.fc1(X_train))
+    else:
+        raise ValueError(f"Feature distance not implemented for activation '{model.act}'.")
     dist = (A_t - A0).norm().item()
     feat_rel_dist = dist / (A0_norm + 1e-12)
 
@@ -94,10 +106,7 @@ def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_nor
     X_test  = data["X_test"]
     y_train = data["y_train"]
     y_test  = data["y_test"]
-    if "y_train_one_hot" in data:
-        y_train_one_hot = data["y_train_one_hot"]
-    else:
-        y_train_one_hot = None
+    y_train_one_hot = data.get("y_train_one_hot", None)
 
     outputs_train = linearized_forward(model, base_params_dict, lin_params, X_train)
     pred_train = outputs_train.argmax(dim=1)
@@ -106,11 +115,9 @@ def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_nor
     outputs_test = linearized_forward(model, base_params_dict, lin_params, X_test)
     pred_test = outputs_test.argmax(dim=1)
     test_acc = (pred_test == y_test).float().mean().item()
-
-    if y_train_one_hot is not None:
-        train_loss = loss_fn(outputs_train, y_train_one_hot).item()
-    else:
-        train_loss = loss_fn(outputs_train, y_train).item()
+    
+    targets = _get_targets_for_loss(outputs_train, y_train, y_train_one_hot)
+    train_loss = loss_fn(outputs_train, targets).item()
 
     param_dist = torch.sqrt(sum((p-p0).pow(2).sum() for p, p0 in zip(lin_params, lin_params0))).item()
     param_norm = torch.sqrt(sum((p).pow(2).sum() for p in lin_params)).item()

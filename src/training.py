@@ -186,12 +186,15 @@ def train(
             )
 
     with torch.no_grad():
+        h0 = model.fc1(X_train)
         if model.act == 'relu':
-            A0 = torch.relu(X_train @ model.fc1.weight.T)
+            A0 = torch.relu(h0)
         elif model.act == 'tanh':
-            A0 = torch.tanh(X_train @ model.fc1.weight.T)
+            A0 = torch.tanh(h0)
         else:
-            raise ValueError(f"Tracking of feature distance does not support activation '{model.act}'.")
+            raise ValueError(
+                f"Tracking of feature distance does not support activation '{model.act}'."
+            )
         A0_norm = A0.norm().item()
 
     metrics = _init_metrics(track_jacobian, use_linearized)
@@ -300,6 +303,9 @@ def _train_multiseed_worker(
     init_model_state_dicts=None, 
     start_model_state_dicts=None,
     start_lin_params_dicts=None,
+    act="tanh",
+    with_bias=False,
+    alpha=1.0,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -346,6 +352,9 @@ def _train_multiseed_worker(
         init_model_state_dict=init_state,
         start_model_state_dict=start_state,
         start_lin_params=start_lin_params,
+        act=act,
+        with_bias=with_bias,
+        alpha=alpha,
     )
 
     return run_seed, metrics
@@ -373,6 +382,9 @@ def train_multiseed(
     init_model_state_dicts=None,
     start_model_state_dicts=None,
     start_lin_params_dicts=None, 
+    act="tanh",
+    with_bias=False,
+    alpha=1.0,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -400,6 +412,9 @@ def train_multiseed(
         init_model_state_dicts,
         start_model_state_dicts,
         start_lin_params_dicts,  
+        act=act,
+        with_bias=with_bias,
+        alpha=alpha,
     )
 
     # create a list of gpu ids & set gpus to spawn
