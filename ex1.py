@@ -15,6 +15,7 @@ import os
 import glob
 from datetime import datetime
 from dataclasses import replace
+import shutil
 
 import numpy as np
 import random
@@ -38,17 +39,17 @@ def main():
     SAVE_CHECKPOINT = True
     USE_CHECKPOINT = True
     EXTEND_FROM_CHECKPOINT = True
-    NEW_EPOCHS = int(5e02)  # this number should be old_num_epochs + extra_num_epochs
+    NEW_EPOCHS = int(6e06)  # this number should be old_num_epochs + extra_num_epochs
 
     if "google.colab" in sys.modules:
         CKPT_DIR = "/content/drive/MyDrive/cld_checkpoints"
     else:
         CKPT_DIR = os.path.expanduser("~/cld_checkpoints/expr1")
-    CKPT_PATH = os.path.join(CKPT_DIR, "exp1_digits_20260126_203556.pt")
+    CKPT_PATH = os.path.join(CKPT_DIR, "exp1_digits_20260127_135649.pt")
 
 
     if not USE_CHECKPOINT:
-        epochs = int(2e02)
+        epochs = int(4e06)
         eta    = 1e-5
         n      = 10
         betas_to_plot = [10*n, 50*n, 100*n]
@@ -88,6 +89,7 @@ def main():
 
             common = replace(config, epochs=extra_epochs).train_kwargs()
             common["gpu_ids"] = gpu_ids
+            common["print_every"] = max(1, extra_epochs // 50)
 
             extended_results = {}
 
@@ -97,34 +99,65 @@ def main():
             sample_metrics = results[sample_beta_key][sample_seed_key]
             timeseries_keys = {k for k in sample_metrics.keys() if k.endswith("_hist")}
 
+            resume_root = os.path.join(CKPT_DIR, "resume_states_tmp")
+            os.makedirs(resume_root, exist_ok=True)
+
             # config.betas is aligned with the dict order you created originally
             for beta, beta_key in zip(config.betas, results.keys()):
                 old_by_seed = results[beta_key]
 
-                # per-seed init and start states
-                init_model_state_dicts = {}
-                start_model_state_dicts = {}
-                start_lin_params_dicts = {}
+                # # per-seed init and start states
+                # init_model_state_dicts = {}
+                # start_model_state_dicts = {}
+                # start_lin_params_dicts = {}
+                # for seed, seed_metrics in old_by_seed.items():
+                #     start_model_state_dicts[seed] = seed_metrics["model_state_dict"]
+                #     if "init_model_state_dict" in seed_metrics:
+                #         init_model_state_dicts[seed] = seed_metrics["init_model_state_dict"]
+                #     else:
+                #         # fallback: if old checkpoint lacks init, use its model_state_dict
+                #         init_model_state_dicts[seed] = seed_metrics["model_state_dict"]
+                #     if "lin_params_state" in seed_metrics:
+                #         start_lin_params_dicts[seed] = seed_metrics["lin_params_state"]
+                #     else:
+                #         start_lin_params_dicts[seed] = None
+
+                # new_by_seed = train_multiseed(
+                #     dataset="digits",
+                #     beta=beta,
+                #     init_model_state_dicts=init_model_state_dicts,
+                #     start_model_state_dicts=start_model_state_dicts,
+                #     start_lin_params_dicts=start_lin_params_dicts,
+                #     **common,
+                # )
+                
+                
+                # write per-seed resume payloads to disk; pass only paths to workers (spawn-friendly)
+                beta_resume_dir = os.path.join(resume_root, beta_key.replace("β", "b"))
+                if os.path.isdir(beta_resume_dir):
+                    shutil.rmtree(beta_resume_dir)
+                os.makedirs(beta_resume_dir, exist_ok=True)
+
+                resume_paths = {}
                 for seed, seed_metrics in old_by_seed.items():
-                    start_model_state_dicts[seed] = seed_metrics["model_state_dict"]
-                    if "init_model_state_dict" in seed_metrics:
-                        init_model_state_dicts[seed] = seed_metrics["init_model_state_dict"]
-                    else:
-                        # fallback: if old checkpoint lacks init, use its model_state_dict
-                        init_model_state_dicts[seed] = seed_metrics["model_state_dict"]
-                    if "lin_params_state" in seed_metrics:
-                        start_lin_params_dicts[seed] = seed_metrics["lin_params_state"]
-                    else:
-                        start_lin_params_dicts[seed] = None
+                    payload = {
+                        "init_model_state_dict": seed_metrics.get(
+                            "init_model_state_dict",
+                            seed_metrics["model_state_dict"],
+                        ),
+                        "start_model_state_dict": seed_metrics["model_state_dict"],
+                        "start_lin_params": seed_metrics.get("lin_params_state", None),
+                    }
+                    p = os.path.join(beta_resume_dir, f"seed_{seed}.pt")
+                    torch.save(payload, p)  # CPU tensors
+                    resume_paths[seed] = p
 
                 new_by_seed = train_multiseed(
-                    dataset="digits",
-                    beta=beta,
-                    init_model_state_dicts=init_model_state_dicts,
-                    start_model_state_dicts=start_model_state_dicts,
-                    start_lin_params_dicts=start_lin_params_dicts,
+                     dataset="digits",
+                     beta=beta,
+                    resume_paths=resume_paths,
                     **common,
-                )
+                 )
 
                 merged_by_seed = {}
                 for seed in old_by_seed.keys():
@@ -155,7 +188,7 @@ def main():
                 extended_results[beta_key] = merged_by_seed
 
             results = extended_results
-            config = replace(config, epochs=NEW_EPOCHS)
+            config = replace(config, epochs=NEW_EPOCHS, print_every=max(1, NEW_EPOCHS // 10))
     else:
         m = max([n * np.log(n) * beta * np.log(beta) for beta in betas_to_plot])
         m = int(max(4096, m))
@@ -189,13 +222,5 @@ def main():
         print(f"Saved checkpoint: {ckpt_path}")
 
 
-    # %%
-    plot_ex1_multiseed(results, config.epochs, config.track_every)
-
-
 if __name__ == "__main__":
-    # optional but harmless on Linux; required on Windows
-    # from multiprocessing import freeze_support
-    # freeze_support()
-
     main()

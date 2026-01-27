@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import random
 import torch
@@ -136,7 +137,7 @@ def train(
     if start_model_state_dict is not None:
         model.load_state_dict(start_model_state_dict)
 
-    print(f"training starts for {device}...")
+    print(f"training starts for {device}...", flush=True)
     stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
     sup_sigma_max_v = stats["sigma_max_v"]
     # print(f"epoch {0:8d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
@@ -173,7 +174,8 @@ def train(
                     f"epoch {epoch:8d} | "
                     f"loss {stats['train_loss']:.4f} (lin: {lin_stats['lin_train_loss']:.4f}) | "
                     f"train acc {stats['train_acc']:.3f} (lin: {lin_stats['lin_train_acc']:.4f}) | "
-                    f"test acc {stats['test_acc']:.3f} (lin: {lin_stats['lin_test_acc']:.4f})"
+                    f"test acc {stats['test_acc']:.3f} (lin: {lin_stats['lin_test_acc']:.4f})",
+                    flush=True
                 )
 
         # ------------------ compute grads & perform steps ------------------ #
@@ -234,9 +236,10 @@ def _train_multiseed_worker(
     jac_probe_size,
     track_every,
     print_every,
-    init_model_state_dicts=None, 
-    start_model_state_dicts=None,
-    start_lin_params_dicts=None,
+    # init_model_state_dicts=None, 
+    # start_model_state_dicts=None,
+    # start_lin_params_dicts=None,
+    resume_paths=None,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -247,22 +250,35 @@ def _train_multiseed_worker(
     np.random.seed(run_seed)
     random.seed(run_seed)
 
+    torch.set_num_threads(5)
+    torch.set_num_interop_threads(1)
+
     if dataset == "digits":
         data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
     else:
         data = load_1d_regression_data(device=device)
 
-    init_state = None
-    if init_model_state_dicts is not None:
-        init_state = init_model_state_dicts.get(run_seed)
+    # init_state = None
+    # if init_model_state_dicts is not None:
+    #     init_state = init_model_state_dicts.get(run_seed)
 
-    start_state = None
-    if start_model_state_dicts is not None:
-        start_state = start_model_state_dicts.get(run_seed)
+    # start_state = None
+    # if start_model_state_dicts is not None:
+    #     start_state = start_model_state_dicts.get(run_seed)
     
+    # start_lin_params = None
+    # if start_lin_params_dicts is not None:
+    #     start_lin_params = start_lin_params_dicts.get(run_seed)
+    init_state = None
+    start_state = None
     start_lin_params = None
-    if start_lin_params_dicts is not None:
-        start_lin_params = start_lin_params_dicts.get(run_seed)
+    if resume_paths is not None:
+        p = resume_paths.get(run_seed)
+        if p is not None:
+            resume = torch.load(p, map_location="cpu", weights_only=False)
+            init_state = resume.get("init_model_state_dict", None)
+            start_state = resume.get("start_model_state_dict", None)
+            start_lin_params = resume.get("start_lin_params", None)
 
     metrics = train(
         data=data,
@@ -307,9 +323,10 @@ def train_multiseed(
     track_every=1,
     print_every=100,
     gpu_ids=None,  
-    init_model_state_dicts=None,
-    start_model_state_dicts=None,
-    start_lin_params_dicts=None, 
+    # init_model_state_dicts=None,
+    # start_model_state_dicts=None,
+    # start_lin_params_dicts=None, 
+    resume_paths=None,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -334,9 +351,7 @@ def train_multiseed(
         jac_probe_size,
         track_every,
         print_every,
-        init_model_state_dicts,
-        start_model_state_dicts,
-        start_lin_params_dicts,  
+        resume_paths, 
     )
 
     # create a list of gpu ids & set gpus to spawn

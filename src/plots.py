@@ -82,7 +82,7 @@ def plot_ex1_multiseed(results, epochs, track_every):
 
     # ------------------------- figure config ------------------------- #
     # ('axes' dict is used later, so don't push this section to the end)
-    plt.figure(figsize=(10, 20))
+    fig = plt.figure(figsize=(10, 20))
     gs   = gridspec.GridSpec(4, 2)
     ax1l = plt.subplot(gs[0, 0])
     ax1r = plt.subplot(gs[0, 1])
@@ -169,8 +169,11 @@ def plot_ex1_multiseed(results, epochs, track_every):
         # ax.set_xscale("log")
         if k in log_axes:
             ax.set_yscale("log")
-        ax.legend()
-    plt.tight_layout()
+        # ax.legend()
+    # put train_loss legend outside
+    handles, labels = axes["train_loss"].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.02), ncol=3)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.show()
 
 def plot_ex2_multiseed(results, epochs, track_every):
