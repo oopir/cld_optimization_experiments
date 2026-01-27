@@ -59,15 +59,16 @@ def load_mnist_data(n, random_labels=False, device="cpu", seed=42):
     X = X.astype(np.float32)
 
     # train/test split: first choose train of size n, rest is test
-    X_train, X_tmp, y_train, y_tmp = train_test_split(X, y, train_size=n, stratify=y)
-    X_test, _, y_test, _ = train_test_split(X_tmp, y_tmp, test_size=max(10, n//5), stratify=y_tmp)
-
+    if n*(6/5) < 60000:
+      X_train, X_tmp, y_train, y_tmp = train_test_split(X, y, train_size=n, stratify=y)
+      X_test, _, y_test, _ = train_test_split(X_tmp, y_tmp, test_size=max(10, n//5), stratify=y_tmp)
+    else:
+      X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.8, stratify=y)
+      
     if random_labels:
         y_train = np.random.randint(0, 10, size=y_train.shape[0])
-
-    # to torch
-    X_train_t = torch.from_numpy(X_train).to(device)
-    X_test_t = torch.from_numpy(X_test).to(device)
+    if random_labels:
+        y_train = np.random.randint(0, 10, size=y_train.shape[0])
 
     X_train = torch.tensor(X_train, device=device)
     X_test  = torch.tensor(X_test, device=device)
