@@ -303,3 +303,33 @@ def plot_1d_regression_curves(x_plot, curves_by_beta):
     plt.legend()
     plt.tight_layout()
     plt.show()
+
+def plot_mnist_training(results_by_seed, epochs, track_every):
+    plt.figure(figsize=(10, 4))
+    gs = gridspec.GridSpec(1, 2)
+    ax_loss = plt.subplot(gs[0, 0])
+    ax_acc  = plt.subplot(gs[0, 1])
+
+    x = np.arange(1, epochs + 1, track_every)
+
+    # loss
+    mean_loss, std_loss = _mean_std_across_seeds(results_by_seed, "train_loss_hist")
+    c0 = plt.rcParams['axes.prop_cycle'].by_key()['color'][0]
+    _plot_band(ax_loss, x, mean_loss, std_loss, label="train loss", color=c0)
+    ax_loss.set_title("train loss")
+    ax_loss.set_xlabel("epoch")
+    ax_loss.legend()
+
+    # accuracies
+    mean_tr_acc, std_tr_acc = _mean_std_across_seeds(results_by_seed, "train_acc_hist")
+    mean_te_acc, std_te_acc = _mean_std_across_seeds(results_by_seed, "test_acc_hist")
+    c1 = plt.rcParams['axes.prop_cycle'].by_key()['color'][1]
+    c2 = plt.rcParams['axes.prop_cycle'].by_key()['color'][2]
+    _plot_band(ax_acc, x, mean_tr_acc, std_tr_acc, label="train acc", color=c1)
+    _plot_band(ax_acc, x, mean_te_acc, std_te_acc, label="test acc",  color=c2)
+    ax_acc.set_title("accuracy")
+    ax_acc.set_xlabel("epoch")
+    ax_acc.legend()
+
+    plt.tight_layout()
+    plt.show()

@@ -1,4 +1,5 @@
 from sklearn.datasets import load_digits
+from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 import torch
 import numpy as np
@@ -40,6 +41,52 @@ def load_digits_data(n, random_labels=False, device="cpu", seed=42):
         "y_test_one_hot": y_test_one_hot,
     }
 
+def load_mnist_data(n, random_labels=False, device="cpu", seed=42):
+    """
+    MNIST loader analogous to load_digits_data:
+      - Fetches MNIST from OpenML
+      - Normalizes inputs to have comparable scale
+      - Returns one-hot labels for classification
+    """
+    mnist = fetch_openml("mnist_784", version=1, as_frame=False)
+    X = mnist["data"].astype(np.float32) / 255.0
+    y = mnist["target"].astype(np.int64)
+
+    X = X - np.mean(X, axis=1, keepdims=True)
+    norms = np.linalg.norm(X, axis=1, keepdims=True)
+    norms[norms == 0.0] = 1.0
+    X = X / norms * np.sqrt(X.shape[1])
+    X = X.astype(np.float32)
+
+    # train/test split: first choose train of size n, rest is test
+    X_train, X_tmp, y_train, y_tmp = train_test_split(X, y, train_size=n, stratify=y)
+    X_test, _, y_test, _ = train_test_split(X_tmp, y_tmp, test_size=max(10, n//5), stratify=y_tmp)
+
+    if random_labels:
+        y_train = np.random.randint(0, 10, size=y_train.shape[0])
+
+    # to torch
+    X_train_t = torch.from_numpy(X_train).to(device)
+    X_test_t = torch.from_numpy(X_test).to(device)
+
+    X_train = torch.tensor(X_train, device=device)
+    X_test  = torch.tensor(X_test, device=device)
+    y_train = torch.tensor(y_train, device=device)
+    y_test  = torch.tensor(y_test, device=device)
+
+    y_train_one_hot = torch.eye(10, device=device)[y_train]
+    y_test_one_hot  = torch.eye(10, device=device)[y_test]
+
+    return {
+        "d_in": 784,
+        "d_out": 10,
+        "X_train": X_train,
+        "X_test": X_test,
+        "y_train": y_train,
+        "y_test": y_test,
+        "y_train_one_hot": y_train_one_hot,
+        "y_test_one_hot": y_test_one_hot,
+    }
 
 def load_1d_regression_data(device="cpu", shuffle=True):
     X_values = np.array([-1.5, -1.12, -0.74, -0.38, 0, 0.38, 0.74, 1.12, 1.5], dtype=np.float32)

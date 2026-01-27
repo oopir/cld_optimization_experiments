@@ -5,7 +5,7 @@ import torch
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing as mp
 
-from .data import load_digits_data, load_1d_regression_data
+from .data import load_digits_data, load_mnist_data, load_1d_regression_data
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
 from .langevin import langevin_step
 from .linearized import (
@@ -95,6 +95,7 @@ def train(
     init_model_state_dict=None, 
     start_model_state_dict=None,
     start_lin_params=None,
+    add_noise=True,
 ):
 
     # --------- init environment & compute values at init for stats -------- #
@@ -187,7 +188,7 @@ def train(
         else:
             train_loss = loss_fn(outputs, data["y_train"])
         train_loss.backward()
-        langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+        langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale, add_noise=add_noise)
 
         if use_linearized:
             for p in lin_params:
@@ -199,7 +200,7 @@ def train(
             else:
                 lin_train_loss = loss_fn(lin_outputs, data["y_train"])
             lin_train_loss.backward()
-            langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+            langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale, add_noise=add_noise)
 
         
 
@@ -237,6 +238,7 @@ def _train_multiseed_worker(
     init_model_state_dicts=None, 
     start_model_state_dicts=None,
     start_lin_params_dicts=None,
+    add_noise=True,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -251,6 +253,12 @@ def _train_multiseed_worker(
         data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
     else:
         data = load_1d_regression_data(device=device)
+    if dataset == "digits":
+        data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
+    elif dataset == "mnist":
+        data = load_mnist_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
+    else:
+        data = load_1d_regression_data(n=n, device=device, seed=run_seed)
 
     init_state = None
     if init_model_state_dicts is not None:
@@ -283,6 +291,7 @@ def _train_multiseed_worker(
         init_model_state_dict=init_state,
         start_model_state_dict=start_state,
         start_lin_params=start_lin_params,
+        add_noise=add_noise,
     )
 
     return run_seed, metrics
@@ -310,6 +319,7 @@ def train_multiseed(
     init_model_state_dicts=None,
     start_model_state_dicts=None,
     start_lin_params_dicts=None, 
+    add_noise=True,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -337,6 +347,7 @@ def train_multiseed(
         init_model_state_dicts,
         start_model_state_dicts,
         start_lin_params_dicts,  
+        add_noise,
     )
 
     # create a list of gpu ids & set gpus to spawn
