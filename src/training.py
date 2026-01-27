@@ -172,9 +172,9 @@ def train(
                 print(
                     f"device {device} | "
                     f"epoch {epoch:8d} | "
-                    f"loss {stats['train_loss']:.4f} (lin: {lin_stats['lin_train_loss']:.4f}) | "
-                    f"train acc {stats['train_acc']:.3f} (lin: {lin_stats['lin_train_acc']:.4f}) | "
-                    f"test acc {stats['test_acc']:.3f} (lin: {lin_stats['lin_test_acc']:.4f})"
+                    f"loss {stats['train_loss']:.4f} | "
+                    f"train acc {stats['train_acc']:.3f} | "
+                    f"test acc {stats['test_acc']:.3f}"
                 )
 
         # ------------------ compute grads & perform steps ------------------ #
