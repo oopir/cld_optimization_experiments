@@ -69,7 +69,10 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
 
     A_Gram = A_t @ A_t.T
     A_Gram = 0.5 * (A_Gram + A_Gram.T)  # numerical symmetrization
-    feat_gram_lambda = torch.linalg.eigvalsh(A_Gram)[0].item()
+    try:
+        feat_gram_lambda = torch.linalg.eigvalsh(A_Gram)[0].item()
+    except Exception:
+        feat_gram_lambda = 1
 
     return {
         "train_loss": train_loss,
