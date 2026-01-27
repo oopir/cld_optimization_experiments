@@ -231,7 +231,10 @@ def estimate_lambda_min(X, M=10000, batch_g=64, device=None):
 
     A /= M
     A = (A + A.T) * 0.5                                     # symmetrize for numerical safety
-    lam_min = torch.linalg.eigvalsh(A)[0].item()
+    try:
+        lam_min = torch.linalg.eigvalsh(A)[0].item()
+    except Exception:
+        lam_min = 1
     return lam_min
 
 def estimate_loss_floor(X_train, noisy_beta, m, device):
