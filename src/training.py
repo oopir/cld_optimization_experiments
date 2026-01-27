@@ -82,7 +82,7 @@ def _init_jacobian_track_vars(
 ):
     # model_at_init is made in case we will want to track Jacobian
     # drift w.r.t. full Jacobian and not just a partial probe
-    model_at_init = TwoLayerNet(d_in=d, m=m, d_out=d_out, with_bias=with_bias, init_type=init_type, aplha=alpha, act=act).to(device)
+    model_at_init = TwoLayerNet(d_in=d, m=m, d_out=d_out, with_bias=with_bias, init_type=init_type, alpha=alpha, act=act).to(device)
     model_at_init.load_state_dict(model.state_dict())
 
     X_probe = X_train[:probe_bs].to(device)
@@ -170,8 +170,7 @@ def train(
                 p.data.copy_(p_prev.to(device=p.device, dtype=p.dtype))
 
     if track_jacobian:
-        model_at_init, X_probe, jac_init, jac_init_norm_sq = \
-            _init_jacobian_track_vars(
+        model_at_init, X_probe, jac_init, jac_init_norm_sq = _init_jacobian_track_vars(
                 data["d_in"], 
                 data["d_out"], 
                 m, 
@@ -179,7 +178,7 @@ def train(
                 device, 
                 model, 
                 X_train, 
-                jac_probe_size
+                jac_probe_size,
                 with_bias=with_bias,
                 act=act,
                 alpha=alpha,
@@ -412,9 +411,9 @@ def train_multiseed(
         init_model_state_dicts,
         start_model_state_dicts,
         start_lin_params_dicts,  
-        act=act,
-        with_bias=with_bias,
-        alpha=alpha,
+        act,
+        with_bias,
+        alpha,
     )
 
     # create a list of gpu ids & set gpus to spawn
