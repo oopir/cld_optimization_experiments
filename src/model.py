@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class TwoLayerNet(nn.Module):
-    def __init__(self, d_in, m, d_out=10, with_bias=False, init_type="standard", alpha=0.1, act="tanh"):
+    def __init__(self, d_in, m, d_out=10, with_bias=False, init_type="standard", alpha=1, act="tanh"):
         super().__init__()
         self.d_in = d_in
         self.m = m
