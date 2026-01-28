@@ -23,7 +23,7 @@ import torch
 
 from src.training import train_multiseed
 from src.utils import select_idle_gpus_for_experiment
-from src.plots import plot_ex1_multiseed, plot_ex1_multiseed_short
+from src.plots import plot_ex1_multiseed
 from src.metric_checkpoints import Exp1Config, save_exp1_checkpoint, load_exp1_checkpoint
 
 def main():
@@ -39,17 +39,17 @@ def main():
     SAVE_CHECKPOINT = True
     USE_CHECKPOINT = True
     EXTEND_FROM_CHECKPOINT = True
-    NEW_EPOCHS = int(6e06)  # this number should be old_num_epochs + extra_num_epochs
+    NEW_EPOCHS = int(4e06)  # this number should be old_num_epochs + extra_num_epochs
+    TRACK_EVERY = 30_000
 
     if "google.colab" in sys.modules:
         CKPT_DIR = "/content/drive/MyDrive/cld_checkpoints"
     else:
         CKPT_DIR = os.path.expanduser("~/cld_checkpoints/expr1")
-    CKPT_PATH = os.path.join(CKPT_DIR, "exp1_digits_20260127_135649.pt")
-
+    CKPT_PATH = os.path.join(CKPT_DIR, "exp1_digits_20260127_072707.pt")
 
     if not USE_CHECKPOINT:
-        epochs = int(4e06)
+        epochs = int(3e06)
         eta    = 1e-5
         n      = 10
         betas_to_plot = [10*n, 50*n, 100*n]
@@ -89,6 +89,7 @@ def main():
 
             common = replace(config, epochs=extra_epochs).train_kwargs()
             common["gpu_ids"] = gpu_ids
+            assert common["track_every"] == config.track_every == TRACK_EVERY
             common["print_every"] = max(1, extra_epochs // 50)
 
             extended_results = {}
@@ -153,11 +154,11 @@ def main():
                     resume_paths[seed] = p
 
                 new_by_seed = train_multiseed(
-                     dataset="digits",
-                     beta=beta,
+                    dataset="digits",
+                    beta=beta,
                     resume_paths=resume_paths,
                     **common,
-                 )
+                )
 
                 merged_by_seed = {}
                 for seed in old_by_seed.keys():
@@ -203,7 +204,7 @@ def main():
             eta=eta,
             m=m,
             device=device,
-            track_every=max(1,epochs//100),
+            track_every=TRACK_EVERY,
             print_every=epochs//5,
         )
 
