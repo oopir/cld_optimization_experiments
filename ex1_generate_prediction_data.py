@@ -1,7 +1,6 @@
 import sys
 import os
 from pathlib import Path
-from datetime import datetime
 from typing import Optional
 
 ROOT = Path.cwd()
@@ -14,55 +13,43 @@ os.environ["PYTHONPATH"] = str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH",
 import numpy as np
 import torch
 from sklearn.datasets import load_digits
-from src.data import load_digits_data
+from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
 
 from src.metric_checkpoints import Exp1Config, load_exp1_checkpoint
 from src.model import TwoLayerNet
 from src.linearized import linearized_forward
 
-
 def _ex1_get_unused_digits(config: Exp1Config, num_points: int = 100, device: str = "cpu"):
     """
-    Construct `num_points` digits points that were not used in *any* (train or test)
-    split of any run in the given Exp1Config.
-    Uses the real `load_digits_data` to exactly reproduce splits.
+    Construct `num_points` digits points that were not used in *any training set*
+    of any run in the given Exp1Config.
+    Points that ever appear in a test set are treated as UNUSED.
     """
-    # Full digits dataset, with the *same* preprocessing as in load_digits_data
     digits = load_digits()
-    X_all = digits.data.astype(np.float32) / 16.0
-    X_all = X_all - np.mean(X_all, axis=1, keepdims=True)
-    X_all = X_all / np.linalg.norm(X_all, axis=1, keepdims=True) * np.sqrt(X_all.shape[1])
-    X_all = X_all.astype(np.float32)
-    y_all = digits.target.astype(np.int64)
+    X = digits.data.astype(np.float32) / 16.0  # scale to [0,1]
+    X = X - np.mean(X, axis=1, keepdims=True)
+    X = X / np.linalg.norm(X, axis=1, keepdims=True) * np.sqrt(X.shape[1])  # ||x|| = sqrt(d)
+    X = X.astype(np.float32)
+    y = digits.target.astype(np.int64)
 
-    n_total = X_all.shape[0]
-
-    # Map each preprocessed sample to its index using exact bytes as key
-    keys_all = [x.tobytes() for x in X_all]
-    key_to_idx = {k: i for i, k in enumerate(keys_all)}
-
+    n_total = X.shape[0]
+    all_idx = np.arange(n_total)
     used_mask = np.zeros(n_total, dtype=bool)
 
-    # Recreate the actual train/test splits via your own loader
+    # Only mark TRAIN points as used; test points are considered unused by design.
     for seed in config.seeds:
-        data = load_digits_data(
-            n=config.n,
-            random_labels=config.random_labels,
-            device="cpu",          # keep on CPU for mapping
-            seed=seed,
+        idx_train, _, y_train, _ = train_test_split(
+            all_idx,
+            y,
+            train_size=config.n,
+            stratify=y,
+            random_state=seed,
         )
-        X_train = data["X_train"].cpu().numpy().astype(np.float32)
-        X_test = data["X_test"].cpu().numpy().astype(np.float32)
+        used_mask[idx_train] = True
 
-        for X_split in (X_train, X_test):
-            for x in X_split:
-                idx = key_to_idx[x.tobytes()]
-                used_mask[idx] = True
-
-    all_idx = np.arange(n_total)
     unused_idx = all_idx[~used_mask]
-
-    print(f"Total points: {n_total}, used: {used_mask.sum()}, unused: {unused_idx.shape[0]}")
+    print(f"Total points: {n_total}, used (train only): {used_mask.sum()}, unused: {unused_idx.shape[0]}")
 
     if unused_idx.shape[0] < num_points:
         raise ValueError(
@@ -70,9 +57,10 @@ def _ex1_get_unused_digits(config: Exp1Config, num_points: int = 100, device: st
         )
 
     chosen_idx = np.random.choice(unused_idx, size=num_points, replace=False)
-    X_sel = torch.tensor(X_all[chosen_idx], device=device)
-    y_sel = torch.tensor(y_all[chosen_idx], device=device)
+    X_sel = torch.tensor(X[chosen_idx], device=device)
+    y_sel = torch.tensor(y[chosen_idx], device=device)
     return chosen_idx, X_sel, y_sel
+
 
 def compute_ex1_oos_predictions(
     ckpt_path: str,
@@ -149,9 +137,85 @@ def compute_ex1_oos_predictions(
 
     return payload
 
+def compute_beta_distance_matrix(payload, beta_key, metric: str = "l2"):
+    """
+    Build pairwise distance matrix between all prediction vectors for a given beta.
+    For each seed we have two vectors: nn, lin.
+    """
+    preds_all = payload["predictions"]
+    if beta_key not in preds_all:
+        raise KeyError(f"beta_key {beta_key!r} not found in payload['predictions']")
+
+    by_seed = preds_all[beta_key]
+
+    vectors = []
+    labels = []
+
+    for seed in sorted(by_seed.keys()):
+        entry = by_seed[seed]
+        v_nn = np.asarray(entry["nn"]).reshape(-1)
+        v_lin = np.asarray(entry["lin"]).reshape(-1)
+        vectors.append(v_nn)
+        labels.append(f"seed{int(seed)}_nn")
+        vectors.append(v_lin)
+        labels.append(f"seed{int(seed)}_lin")
+
+    n_vec = len(vectors)
+    D = np.zeros((n_vec, n_vec), dtype=float)
+
+    if metric == "l2":
+        for i in range(n_vec):
+            for j in range(n_vec):
+                diff = vectors[i] - vectors[j]
+                D[i, j] = np.linalg.norm(diff)
+    else:
+        raise ValueError(f"Unsupported metric: {metric}")
+
+    return D, labels
+
+
+def plot_beta_distance_heatmap(D, labels, ckpt_path, beta_key, save_dir: Optional[str] = None):
+    n_vec = D.shape[0]
+
+    # root directory to place the checkpoint-specific folder in
+    if save_dir is None:
+        save_dir = os.path.dirname(ckpt_path)
+
+    ckpt_base = os.path.basename(ckpt_path)
+    ckpt_stem, _ = os.path.splitext(ckpt_base)
+    beta_tag = str(beta_key).replace("β", "b")
+
+    # dedicated folder per checkpoint
+    ckpt_fig_dir = os.path.join(save_dir, ckpt_stem)
+    os.makedirs(ckpt_fig_dir, exist_ok=True)
+
+    out_png = os.path.join(ckpt_fig_dir, f"{beta_tag}_dist_heatmap.png")
+
+    fig_width = 0.6 * n_vec + 2.0
+    fig_height = 0.6 * n_vec + 2.0
+
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    im = ax.imshow(D)
+
+    ax.set_xticks(np.arange(n_vec))
+    ax.set_yticks(np.arange(n_vec))
+    ax.set_xticklabels(labels, rotation=90, fontsize=8)
+    ax.set_yticklabels(labels, fontsize=8)
+
+    ax.set_title(f"Prediction distances for {beta_key}")
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=200)
+    plt.close(fig)
+
+    print(f"Saved distance heatmap for {beta_key} to {out_png}")
+
+
+
 def main():
     ckpt_dir = "/home/ofirg/cld_checkpoints/expr1"
-    ckpt_name = "exp1_digits_20260127_135649.pt"
+    ckpt_name = "exp1_digits_20260128_155418.pt"
     ckpt_path = os.path.join(ckpt_dir , ckpt_name)
     payload = compute_ex1_oos_predictions(
         ckpt_path=ckpt_path,
@@ -159,6 +223,11 @@ def main():
         save=True,
         save_dir=ckpt_dir,
     )
+    # build and plot distance heatmaps for each beta
+    for beta_key in payload["predictions"].keys():
+        D, labels = compute_beta_distance_matrix(payload, beta_key, metric="l2")
+        plot_beta_distance_heatmap(D, labels, payload["ckpt_path"], beta_key, save_dir=ckpt_dir)
+ 
 
 if __name__ == "__main__":
     main()
