@@ -54,7 +54,7 @@ def main():
         eta    = 1e-5
         n      = 10
         betas_to_plot = [10*n, 50*n, 100*n]
-        seeds = list(range(5))
+        seeds = list(range(10))
 
     # %%
     def latest_exp1_checkpoint():
