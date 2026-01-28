@@ -37,9 +37,10 @@ def main():
 
     # %%
     SAVE_CHECKPOINT = True
-    USE_CHECKPOINT = True
-    EXTEND_FROM_CHECKPOINT = True
+    USE_CHECKPOINT = False
+    EXTEND_FROM_CHECKPOINT = False
     NEW_EPOCHS = int(6e06)  # this number should be old_num_epochs + extra_num_epochs
+    TRACK_EVERY = 30_000
 
     if "google.colab" in sys.modules:
         CKPT_DIR = "/content/drive/MyDrive/cld_checkpoints"
@@ -49,7 +50,7 @@ def main():
 
 
     if not USE_CHECKPOINT:
-        epochs = int(4e06)
+        epochs = int(1e06)
         eta    = 1e-5
         n      = 10
         betas_to_plot = [10*n, 50*n, 100*n]
@@ -89,6 +90,7 @@ def main():
 
             common = replace(config, epochs=extra_epochs).train_kwargs()
             common["gpu_ids"] = gpu_ids
+            assert common["track_every"] == config.track_every
             common["print_every"] = max(1, extra_epochs // 50)
 
             extended_results = {}
@@ -203,8 +205,8 @@ def main():
             eta=eta,
             m=m,
             device=device,
-            track_every=max(1,epochs//100),
-            print_every=epochs//5,
+            track_every=TRACK_EVERY,
+            print_every=epochs//50,
         )
 
         common = config.train_kwargs()
