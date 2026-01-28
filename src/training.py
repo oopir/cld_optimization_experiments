@@ -8,7 +8,7 @@ import multiprocessing as mp
 
 from .data import load_digits_data, load_1d_regression_data
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
-from .langevin import langevin_step
+from .langevin import langevin_step, joint_langevin_step
 from .linearized import (
     init_linearization,
     linearized_forward,
