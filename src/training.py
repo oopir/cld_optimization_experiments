@@ -189,7 +189,6 @@ def train(
         else:
             train_loss = loss_fn(outputs, data["y_train"])
         train_loss.backward()
-        langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
 
         if use_linearized:
             for p in lin_params:
@@ -201,7 +200,9 @@ def train(
             else:
                 lin_train_loss = loss_fn(lin_outputs, data["y_train"])
             lin_train_loss.backward()
-            langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+            joint_langevin_step(params, lam_tensors, lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+        else:
+            langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
 
         
 
