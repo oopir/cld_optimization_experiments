@@ -117,8 +117,16 @@ def plot_ex1_multiseed(results, epochs, track_every):
 
     # ------------------------ actual plotting ------------------------ #  
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
-    x      = np.arange(1, epochs+1, track_every)
+    # infer x from epoch_hist if present; else fall back to track_every
+    sample_beta_key = next(iter(results.keys()))
+    sample_seed_key = next(iter(results[sample_beta_key].keys()))
+    sample_metrics = results[sample_beta_key][sample_seed_key]
 
+    if "epoch_hist" in sample_metrics:
+        x = np.asarray(sample_metrics["epoch_hist"])
+    else:
+        x = np.arange(1, epochs + 1, track_every)
+        
     for run_name, run_results_by_seed in results.items():
         c = next(colors)
         
