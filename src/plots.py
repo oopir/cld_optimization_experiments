@@ -12,13 +12,13 @@ mpl.rcParams.update(
     {
         "figure.dpi": 300,
         "savefig.dpi": 300,
-        "font.size": 8,
-        "axes.labelsize": 9,
-        "xtick.labelsize": 7,
-        "ytick.labelsize": 7,
+        "font.size": 10,
+        "axes.labelsize": 13,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
         "legend.fontsize": 7,
         "axes.linewidth": 0.8,
-        "lines.linewidth": 1.0,
+        "lines.linewidth": 2.0,
     }
 )
 
@@ -27,9 +27,9 @@ def _mean_std_across_seeds(results_by_seed, key):
     arr = np.stack(histories, axis=0)  # (n_seeds, T)
     return arr.mean(axis=0), arr.std(axis=0)
 
-def _plot_band(ax, x, mean, std, label, color, lin=False):
+def _plot_band(ax, x, mean, std, label, color, lin=False, lw=2.0):
     linestyle = "--" if lin else "-"
-    ax.plot(x, mean, label=label, color=color, linestyle=linestyle, linewidth=1.0)
+    ax.plot(x, mean, label=label, color=color, linestyle=linestyle, linewidth=lw)
     ax.fill_between(x, mean - std, mean + std, alpha=0.2, color=color, linewidth=0.0)
 
 def plot_ex1_multiseed(results, epochs, track_every):
@@ -66,16 +66,16 @@ def plot_ex1_multiseed(results, epochs, track_every):
         "train_loss": ax4r,
     }
     ylabels = {
-        "jacobian_dist_l2": "relative Jacobian distance (L2)",
-        "jacobian_dist_co": "Jacobian distance (cosine)",
-        "nn_to_lin_dist_l2": "relative parameter distance (L2)",
-        "nn_to_lin_dist_co": "parameter distance (cosine)",
-        "feat_rel_dist": "relative feature distance (L2)",
-        "feat_cos_dist": "feature distance (cosine)",
-        "feat_gram_lambda": "λ_min of feature Gram matrix",
+        "jacobian_dist_l2": "distance (L2)",
+        "jacobian_dist_co": "distance (cosine)",
+        "nn_to_lin_dist_l2": "distance (L2)",
+        "nn_to_lin_dist_co": "distance (cosine)",
+        "feat_rel_dist": "distance (L2)",
+        "feat_cos_dist": "(cosine)",
+        "feat_gram_lambda": "λ_min",
         "train_loss": "training loss",
      }
-    log_axes = {"jacobian_dist_l2", "nn_to_lin_dist_l2", "feat_rel_dist", "feat_gram_lambda"}
+    log_axes = {"feat_gram_lambda"}
 
     # ------------------------ actual plotting ------------------------ #  
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
@@ -129,9 +129,9 @@ def plot_ex1_multiseed(results, epochs, track_every):
 
         # accuracy/loss (nonlinear vs linearized)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
-        _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c)
+        _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.0)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
-        _plot_band(axes["train_loss"], x, mean, std, label=f"{run_name} lin", color=c, lin=True)
+        _plot_band(axes["train_loss"], x, mean, std, label=f"linear", color=c, lin=True, lw=1.0)
 
     for k, ax in axes.items():
         ax.set_xlabel("epoch")
@@ -143,6 +143,10 @@ def plot_ex1_multiseed(results, epochs, track_every):
 
     handles, labels = axes["train_loss"].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.95), ncol=3, frameon=False,)
+    ax1r.legend(loc="best", frameon=False, fontsize=9)
+    ax2r.legend(loc="best", frameon=False, fontsize=9)
+    # ax4r.legend(loc="center", bbox_to_anchor=(0.5, 0.3), frameon=False, fontsize=7, ncol=3)
+    # ax4r.set_ylim(top=1.0)  
     plt.tight_layout(rect=[0, 0, 1, 0.93])
     
     fig.canvas.draw()
@@ -151,18 +155,49 @@ def plot_ex1_multiseed(results, epochs, track_every):
     axes_list = [ax1l, ax1r, ax2l, ax2r, ax3l, ax3r, ax4l, ax4r]
     legend = fig.legends[0] if fig.legends else None
 
+    # --- per-axis tight bboxes in inches ---
+    bboxes_in = {}
+    widths = []
+    heights = []
+    for name, ax in axes.items():
+        bb = ax.get_tightbbox(renderer)
+        bb_in = bb.transformed(fig.dpi_scale_trans.inverted())
+        bboxes_in[name] = bb_in
+        widths.append(bb_in.x1 - bb_in.x0)
+        heights.append(bb_in.y1 - bb_in.y0)
+
+    max_w = max(widths)
+    max_h = max(heights)
+
+    pad_lr = 0.03   # horizontal padding (both sides)
+    pad_top = 0.05  # vertical padding at top
+    pad_bottom = 0.0  # keep bottom essentially tight
+
     for name, ax in axes.items():
         # show only this axis
         for a in axes_list:
             a.set_visible(a is ax)
-        # hide global legend for per-panel files
+        # hide global legend
         if legend is not None:
             legend.set_visible(False)
-        # tight bbox (includes labels), then extend only upwards
-        bbox = ax.get_tightbbox(renderer)
-        bbox = bbox.transformed(fig.dpi_scale_trans.inverted())  # to inches
-        bbox = Bbox.from_extents(bbox.x0 - 0.1, bbox.y0, bbox.x1 + 0.1, bbox.y1 + 0.30)
-        fig.savefig(f"expr1_{name}.pdf", bbox_inches=bbox)
+
+        bb = bboxes_in[name]
+        w = bb.x1 - bb.x0
+        h = bb.y1 - bb.y0
+
+        # bbox with:
+        # - same left boundary across all axes (bb.x0 - pad_lr)
+        # - same total width (max_w + 2*pad_lr)
+        # - bottom ~tight (bb.y0 - pad_bottom)
+        # - extra height added only at the top to reach max_h
+        bbox_equal = Bbox.from_extents(
+            bb.x0 - pad_lr,
+            bb.y0 - pad_bottom,
+            bb.x0 + max_w + pad_lr,
+            bb.y1 + (max_h - h) + pad_top,
+        )
+
+        fig.savefig(f"expr1_{name}.pdf", bbox_inches=bbox_equal)
 
     # restore full figure (optional)
     for a in axes_list:
