@@ -26,6 +26,35 @@ from .stats import (
     estimate_loss_floor
 )
 
+def _save_rng_state(device: str):
+    state = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch_cpu": torch.get_rng_state(),
+        "torch_cuda": None,
+    }
+    if isinstance(device, str) and device.startswith("cuda") and torch.cuda.is_available():
+        if ":" in device:
+            idx = int(device.split(":", 1)[1])
+        else:
+            idx = torch.cuda.current_device()
+        state["torch_cuda"] = torch.cuda.get_rng_state(device=idx)
+    return state
+
+def _load_rng_state(device: str, state):
+    if state is None:
+        return
+    random.setstate(state["python"])
+    np.random.set_state(state["numpy"])
+    torch.set_rng_state(state["torch_cpu"])
+    cuda_state = state.get("torch_cuda", None)
+    if cuda_state is not None and isinstance(device, str) and device.startswith("cuda") and torch.cuda.is_available():
+        if ":" in device:
+            idx = int(device.split(":", 1)[1])
+        else:
+            idx = torch.cuda.current_device()
+        torch.cuda.set_rng_state(cuda_state, device=idx)
+
 def _init_base_model_vars(d_in, d_out, m, init_type, device, lam_fc1, lam_fc2, init_model_state_dict=None):
 
     model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, init_type=init_type).to(device)
@@ -96,6 +125,7 @@ def train(
     init_model_state_dict=None, 
     start_model_state_dict=None,
     start_lin_params=None,
+    resume_rng_state=None,
 ):
 
     # --------- init environment & compute values at init for stats -------- #
@@ -136,6 +166,9 @@ def train(
 
     if start_model_state_dict is not None:
         model.load_state_dict(start_model_state_dict)
+
+    if resume_rng_state is not None:
+        _load_rng_state(device, resume_rng_state)
 
     print(f"training starts for {device}...", flush=True)
     stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
@@ -203,7 +236,7 @@ def train(
             lin_train_loss.backward()
             langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
 
-        
+    metrics["rng_state"] = _save_rng_state(device)
 
     # -------------------- compute remaining stats --------------------- #
     metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v)
@@ -213,7 +246,6 @@ def train(
     metrics["init_model_state_dict"] = init_state_for_metrics
     if use_linearized:
         metrics["lin_params_state"] = [p.detach().cpu() for p in lin_params]
-
 
     return metrics
 
@@ -272,6 +304,7 @@ def _train_multiseed_worker(
     init_state = None
     start_state = None
     start_lin_params = None
+    rng_state = None
     if resume_paths is not None:
         p = resume_paths.get(run_seed)
         if p is not None:
@@ -279,6 +312,7 @@ def _train_multiseed_worker(
             init_state = resume.get("init_model_state_dict", None)
             start_state = resume.get("start_model_state_dict", None)
             start_lin_params = resume.get("start_lin_params", None)
+            rng_state = resume.get("rng_state", None)
 
     metrics = train(
         data=data,
@@ -299,6 +333,7 @@ def _train_multiseed_worker(
         init_model_state_dict=init_state,
         start_model_state_dict=start_state,
         start_lin_params=start_lin_params,
+        resume_rng_state=rng_state,
     )
 
     return run_seed, metrics
