@@ -32,7 +32,7 @@ def _plot_band(ax, x, mean, std, label, color, lin=False, lw=2.0):
     ax.plot(x, mean, label=label, color=color, linestyle=linestyle, linewidth=lw)
     ax.fill_between(x, mean - std, mean + std, alpha=0.2, color=color, linewidth=0.0)
 
-def plot_ex1_multiseed(results, epochs, track_every):
+def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
     # check if any run actually tracked jacobian distances
     has_jacobian_any = any(
         any("jacobian_dist_hist" in r for r in run_results_by_seed.values())
@@ -104,15 +104,16 @@ def plot_ex1_multiseed(results, epochs, track_every):
         _plot_band(axes["jacobian_dist_co"], x, co_mean, co_std, label=run_name, color=c)
         
         # param distances
-        param_histories = [np.asarray(r["nn_lin_param_dist_hist"]) for r in run_results_by_seed.values()]
-        param_arr = np.stack(param_histories, axis=0)  # (n_seeds, T, 2)
-        l2_mean = param_arr[:, :, 0].mean(axis=0)
-        l2_std  = param_arr[:, :, 0].std(axis=0)
-        l2_mean[0] = max(l2_mean[0], 1e-12)
-        _plot_band(axes["nn_to_lin_dist_l2"], x, l2_mean, l2_std, label=run_name, color=c)
-        co_mean = param_arr[:, :, 1].mean(axis=0)
-        co_std  = param_arr[:, :, 1].std(axis=0)
-        _plot_band(axes["nn_to_lin_dist_co"], x, co_mean, co_std, label=run_name, color=c)
+        if use_linearized:
+            param_histories = [np.asarray(r["nn_lin_param_dist_hist"]) for r in run_results_by_seed.values()]
+            param_arr = np.stack(param_histories, axis=0)  # (n_seeds, T, 2)
+            l2_mean = param_arr[:, :, 0].mean(axis=0)
+            l2_std  = param_arr[:, :, 0].std(axis=0)
+            l2_mean[0] = max(l2_mean[0], 1e-12)
+            _plot_band(axes["nn_to_lin_dist_l2"], x, l2_mean, l2_std, label=run_name, color=c)
+            co_mean = param_arr[:, :, 1].mean(axis=0)
+            co_std  = param_arr[:, :, 1].std(axis=0)
+            _plot_band(axes["nn_to_lin_dist_co"], x, co_mean, co_std, label=run_name, color=c)
 
         # relative feature distance
         mean, std = _mean_std_across_seeds(run_results_by_seed, "feat_rel_dist_hist")
@@ -130,8 +131,9 @@ def plot_ex1_multiseed(results, epochs, track_every):
         # accuracy/loss (nonlinear vs linearized)
         mean, std = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
         _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.0)
-        mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
-        _plot_band(axes["train_loss"], x, mean, std, label=f"linear", color=c, lin=True, lw=1.0)
+        if use_linearized:
+            mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
+            _plot_band(axes["train_loss"], x, mean, std, label=f"linear", color=c, lin=True, lw=1.0)
 
     for k, ax in axes.items():
         ax.set_xlabel("epoch")
