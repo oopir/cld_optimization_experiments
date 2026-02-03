@@ -59,8 +59,6 @@ def loss_fn(outputs, targets):
 
 # ---------------------------------------------------------------------------
 # Diagonal lambda (per-parameter) construction
-# You can set different lambdas for different parameter tensors.
-# This matches diag(lambda) theta as elementwise shrink.
 # ---------------------------------------------------------------------------
 def make_lambda_like_params(model, init_type, lam_fc1, lam_fc2, lam_bi1=None, lam_bi2=None):
     tanh_gain_sq = nn.init.calculate_gain(model.act)**2
