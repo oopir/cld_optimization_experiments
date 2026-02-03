@@ -39,32 +39,3 @@ def load_digits_data(n, random_labels=False, device="cpu", seed=42):
         "y_train_one_hot": y_train_one_hot,
         "y_test_one_hot": y_test_one_hot,
     }
-
-
-def load_1d_regression_data(device="cpu", shuffle=True):
-    X_values = np.array([-1.5, -1.12, -0.74, -0.38, 0, 0.38, 0.74, 1.12, 1.5], dtype=np.float32)
-    y_values = np.array([0, 0, 0, 1, 1, 1, 0, 0, 0], dtype=np.float32)
-
-    X = np.asarray(X_values, dtype=np.float32).reshape(-1, 1)
-    y = np.asarray(y_values, dtype=np.float32)
-
-    if shuffle:
-        idx = np.random.permutation(len(X))
-        X = X[idx]
-        y = y[idx]
-
-    X_train, X_test, y_train, y_test = X, X, y, y
-
-    X_train = torch.tensor(X_train, device=device)
-    X_test = torch.tensor(X_test, device=device)
-    y_train = torch.tensor(y_train, device=device)
-    y_test = torch.tensor(y_test, device=device)
-
-    return {
-        "d_in": 1,
-        "d_out": 1,
-        "X_train": X_train,
-        "X_test": X_test,
-        "y_train": y_train,
-        "y_test": y_test,
-    }
