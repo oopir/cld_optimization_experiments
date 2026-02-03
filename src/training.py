@@ -99,7 +99,6 @@ def _init_metrics(track_jacobian, use_linearized):
     metrics = {f"{name}_hist": [] for name in BASE_METRIC_NAMES}
     if track_jacobian:
         metrics["jacobian_dist_hist"] = []
-    # if use_linearized:
     for name in LIN_METRIC_NAMES:
         metrics[f"{name}_hist"] = []
     metrics["nn_to_lin_hist"] = []
@@ -268,9 +267,6 @@ def _train_multiseed_worker(
     jac_probe_size,
     track_every,
     print_every,
-    # init_model_state_dicts=None, 
-    # start_model_state_dicts=None,
-    # start_lin_params_dicts=None,
     resume_paths=None,
 ):
     torch.backends.cudnn.deterministic = True
@@ -290,13 +286,6 @@ def _train_multiseed_worker(
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
 
-    # start_state = None
-    # if start_model_state_dicts is not None:
-    #     start_state = start_model_state_dicts.get(run_seed)
-    
-    # start_lin_params = None
-    # if start_lin_params_dicts is not None:
-    #     start_lin_params = start_lin_params_dicts.get(run_seed)
     init_state = None
     start_state = None
     start_lin_params = None
