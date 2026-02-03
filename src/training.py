@@ -6,7 +6,7 @@ import torch
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing as mp
 
-from .data import load_digits_data, load_1d_regression_data
+from .data import load_digits_data
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
 from .langevin import langevin_step
 from .linearized import (
@@ -288,11 +288,7 @@ def _train_multiseed_worker(
     if dataset == "digits":
         data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
     else:
-        data = load_1d_regression_data(device=device)
-
-    # init_state = None
-    # if init_model_state_dicts is not None:
-    #     init_state = init_model_state_dicts.get(run_seed)
+        raise ValueError(f"Unsupported dataset: {dataset}")
 
     # start_state = None
     # if start_model_state_dicts is not None:
@@ -442,140 +438,3 @@ def train_multiseed(
             results[run_seed] = metrics
 
     return results
-
-def train_and_return_model(
-    seed,
-    data,
-    eta,
-    epochs,
-    beta,
-    m,
-    init_type="standard",
-    alpha=0.1,
-    lam_fc1=None,
-    lam_fc2=None,
-    regularization_scale=1.0,
-    device="cpu",
-    print_every=100,
-    target_loss=None,
-):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-
-    X_train = data["X_train"]
-    y_train = data["y_train"].unsqueeze(1)  # (N, 1)
-    d_in = data["d_in"]
-    d_out = data["d_out"]
-
-    model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, with_bias=True, init_type=init_type, alpha=alpha, act="relu").to(device)
-    params, lam_tensors = make_lambda_like_params(model, init_type, lam_fc1, lam_fc2)
-
-    for epoch in range(epochs):
-        model.train()
-        for p in params:
-            if p.grad is not None:
-                p.grad.zero_()
-        outputs = model(X_train)
-        loss = loss_fn(outputs, y_train)
-        loss.backward()
-        langevin_step(params,lam_tensors,beta=beta,eta=eta,regularization_scale=regularization_scale)
-        # if epoch % print_every == 0:
-        #     print(f"    epoch = {epoch:5} | loss = {loss:.2}")
-        loss_val = loss.item()
-        if epoch % print_every == 0:
-            print(f"    epoch = {epoch:5} | loss = {loss_val:.2}")
-        if (target_loss is not None) and (loss_val <= target_loss):
-            if print_every:
-                print(f"    early stopping at epoch = {epoch:5} | loss = {loss_val:.3g}")
-            break
-
-    return model
-
-def get_1d_regression_curves_for_betas(
-    x_plot,
-    seeds, 
-    eta, 
-    epochs, 
-    betas, 
-    init_type="standard",
-    regularization_scale=1.0, 
-    device="cpu", 
-    print_every=100,
-    target_loss=None,
-):
-    curves = {}
-    m_values = [int(min(1e05, beta * np.log(beta))) for beta in betas]
-    m_max = max(m_values)
-    m_max = 10000  # hardcoded until replication works
-    for beta in betas:
-        print(f"beta={beta:.0e}, m={m_max:.2e}")
-        fs = []
-        for seed in seeds:
-            print(f"  seed={seed}")
-            data = load_1d_regression_data(device=device)
-
-            model = train_and_return_model(
-                seed=seed, 
-                data=data, 
-                eta=eta, 
-                epochs=epochs, 
-                beta=beta, 
-                m=m_max,
-                init_type=init_type,
-                regularization_scale=regularization_scale, 
-                device=device, 
-                print_every=print_every,
-                target_loss=target_loss,
-            )
-            with torch.no_grad():
-                f = model(x_plot).cpu().numpy().ravel()
-            fs.append(f)
-        curves[beta] = np.stack(fs, axis=0)  # (n_seeds, n_grid)
-    return curves
-
-def get_1d_regression_curves_for_alphas(
-    x_plot,
-    seeds,
-    eta,
-    epochs,
-    alphas,
-    beta,
-    init_type="alpha",
-    regularization_scale=0.0,
-    device="cpu",
-    print_every=100,
-    target_loss=None,
-):
-    curves = {}
-    m = 10000  # hardcoded until replication works
-    for alpha in alphas:
-        print(f"alpha={alpha:.1e}, m={m:.2e}")
-        eta_alpha = min(1e-2, eta / alpha)
-        print(f"eta for {alpha} is {eta_alpha:.2e}")
-        fs = []
-        for seed in seeds:
-            print(f"  seed={seed}")
-            data = load_1d_regression_data(device=device)
-
-            # same seed + init_type="alpha" ⇒ same base w0; alpha rescales it
-            model = train_and_return_model(
-                seed=seed,
-                data=data,
-                eta=eta_alpha,
-                epochs=epochs,
-                beta=beta,
-                m=m,
-                init_type=init_type,
-                regularization_scale=regularization_scale,
-                device=device,
-                print_every=print_every,
-                alpha=alpha,
-                target_loss=target_loss,
-            )
-            with torch.no_grad():
-                f = model(x_plot).cpu().numpy().ravel()
-            fs.append(f)
-        curves[alpha] = np.stack(fs, axis=0)
-    return curves
