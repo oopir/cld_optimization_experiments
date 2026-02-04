@@ -1,10 +1,9 @@
-import os
-import numpy as np
-import random
-import torch
-
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing as mp
+
+import random
+import numpy as np
+import torch
 
 from .data import load_digits_data
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
@@ -20,7 +19,7 @@ from .stats import (
     get_stats,
     get_linear_stats,
     get_nn_lin_param_dist,
-    compute_jacobian_dist,
+    # compute_jacobian_dist,
     compute_dataset_ntk_drift,
     compute_dist_bound_under_GF,
     estimate_loss_floor
@@ -95,7 +94,7 @@ def _init_jacobian_track_vars(d, d_out, m, init_type, device, model, X_train, pr
 
     return model_at_init, X_probe, jac_init, jac_init_norm_sq
 
-def _init_metrics(track_jacobian, use_linearized):
+def _init_metrics(track_jacobian):
     metrics = {f"{name}_hist": [] for name in BASE_METRIC_NAMES}
     if track_jacobian:
         metrics["jacobian_dist_hist"] = []
@@ -121,7 +120,7 @@ def train(
     device="cpu",
     track_every=1,
     print_every=100,
-    init_model_state_dict=None, 
+    init_model_state_dict=None,
     start_model_state_dict=None,
     start_lin_params=None,
     resume_rng_state=None,
@@ -129,7 +128,7 @@ def train(
 
     # --------- init environment & compute values at init for stats -------- #
     X_train = data["X_train"]
-    d = X_train.shape[1]
+    # d = X_train.shape[1]
 
     model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0 = \
         _init_base_model_vars(data["d_in"], data["d_out"], m, init_type, device, lam_fc1, lam_fc2, init_model_state_dict)
@@ -141,7 +140,7 @@ def train(
 
     if use_linearized:
         (
-            base_params_dict, lin_params, lin_lam_tensors, lin_params0, 
+            base_params_dict, lin_params, lin_lam_tensors, lin_params0,
             lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0
         ) = _init_linearization_vars(model, params0, lam_tensors)
         if start_lin_params is not None:
@@ -149,8 +148,11 @@ def train(
                 p.data.copy_(p_prev.to(device=p.device, dtype=p.dtype))
 
     if track_jacobian:
-        model_at_init, X_probe, jac_init, jac_init_norm_sq = \
+        # model_at_init, X_probe, jac_init, jac_init_norm_sq = \
+        #     _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, device, model, X_train, jac_probe_size)
+        model_at_init, _, _, _ = \
             _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, device, model, X_train, jac_probe_size)
+
 
     with torch.no_grad():
         if model.act == 'relu':
@@ -161,7 +163,7 @@ def train(
             raise ValueError(f"Tracking of feature distance does not support activation '{model.act}'.")
         A0_norm = A0.norm().item()
 
-    metrics = _init_metrics(track_jacobian, use_linearized)
+    metrics = _init_metrics(track_jacobian)
 
     if start_model_state_dict is not None:
         model.load_state_dict(start_model_state_dict)
@@ -191,12 +193,12 @@ def train(
 
             if use_linearized:
                 lin_stats = get_linear_stats(model, base_params_dict, lin_params, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0, data)
-                
+
                 for name in LIN_METRIC_NAMES:
                     metrics[f"{name}_hist"].append(lin_stats[name])
                 nn_to_lin_dist = torch.sqrt(sum((p-q).pow(2).sum() for p, q in zip(params, lin_params))).item()
                 metrics["nn_to_lin_hist"].append(nn_to_lin_dist)
-                
+
                 nn_lin_param_dist = get_nn_lin_param_dist(params, lin_params)
                 metrics["nn_lin_param_dist_hist"].append(nn_lin_param_dist)
 
@@ -342,15 +344,15 @@ def train_multiseed(
     device="cpu",
     track_every=1,
     print_every=100,
-    gpu_ids=None,  
+    gpu_ids=None,
     # init_model_state_dicts=None,
     # start_model_state_dicts=None,
-    # start_lin_params_dicts=None, 
+    # start_lin_params_dicts=None,
     resume_paths=None,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    
+
     results = {}
     if not seeds:
         return results
@@ -371,7 +373,7 @@ def train_multiseed(
         jac_probe_size,
         track_every,
         print_every,
-        resume_paths, 
+        resume_paths,
     )
 
     # create a list of gpu ids & set gpus to spawn

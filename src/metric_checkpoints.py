@@ -1,5 +1,5 @@
-import torch
 from dataclasses import dataclass, field
+import torch
 
 @dataclass
 class Exp1Config:
@@ -26,7 +26,7 @@ class Exp1Config:
     jac_probe_size: int = 10
     track_every: int = 10
     print_every: int = 100
-    
+
     def train_kwargs(self):
         return dict(
             seeds=self.seeds,
@@ -59,8 +59,5 @@ def load_exp1_checkpoint(path):
     payload_type = payload.get("type", "exp1") # 2nd argument "tolerates" old ckpts w/o "type" field
     if payload_type != "exp1":
         raise ValueError(f"Unexpected checkpoint type: {payload_type}")
-    
+
     return payload["results"], payload["config"]
-
-
-

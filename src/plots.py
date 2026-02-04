@@ -75,7 +75,7 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
      }
     log_axes = {"feat_gram_lambda"}
 
-    # ------------------------ actual plotting ------------------------ #  
+    # ------------------------ actual plotting ------------------------ #
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
     # infer x from epoch_hist if present; else fall back to track_every
     sample_beta_key = next(iter(results.keys()))
@@ -86,10 +86,10 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         x = np.asarray(sample_metrics["epoch_hist"])
     else:
         x = np.arange(1, epochs + 1, track_every)
-        
+
     for run_name, run_results_by_seed in results.items():
         c = next(colors)
-        
+
         # jacobian distances
         jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]
         jac_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
@@ -100,7 +100,7 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         co_mean = jac_arr[:, :, 1].mean(axis=0)
         co_std  = jac_arr[:, :, 1].std(axis=0)
         _plot_band(axes["jacobian_dist_co"], x, co_mean, co_std, label=run_name, color=c)
-        
+
         # param distances
         if use_linearized:
             param_histories = [np.asarray(r["nn_lin_param_dist_hist"]) for r in run_results_by_seed.values()]
@@ -131,7 +131,7 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.0)
         if use_linearized:
             mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
-            _plot_band(axes["train_loss"], x, mean, std, label=f"linear", color=c, lin=True, lw=1.0)
+            _plot_band(axes["train_loss"], x, mean, std, label="linear", color=c, lin=True, lw=1.0)
 
     for k, ax in axes.items():
         ax.set_xlabel("epoch")
@@ -146,9 +146,9 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
     ax1r.legend(loc="best", frameon=False, fontsize=9)
     ax2r.legend(loc="best", frameon=False, fontsize=9)
     # ax4r.legend(loc="center", bbox_to_anchor=(0.5, 0.3), frameon=False, fontsize=7, ncol=3)
-    # ax4r.set_ylim(top=1.0)  
+    # ax4r.set_ylim(top=1.0)
     plt.tight_layout(rect=[0, 0, 1, 0.93])
-    
+
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
 
@@ -182,7 +182,7 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
             legend.set_visible(False)
 
         bb = bboxes_in[name]
-        w = bb.x1 - bb.x0
+        # w = bb.x1 - bb.x0
         h = bb.y1 - bb.y0
 
         # bbox with:
@@ -205,4 +205,4 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
     if legend is not None:
         legend.set_visible(True)
 
-    fig.savefig(f"expr1_full.pdf", bbox_inches="tight")
+    fig.savefig("expr1_full.pdf", bbox_inches="tight")
