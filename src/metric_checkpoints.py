@@ -1,15 +1,15 @@
 import torch
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class Exp1Config:
     # parallelization
-    seeds: list = [0]
+    seeds: list = field(default_factory=lambda: [0])
     device: str = "cpu"
     # data
     dataset: str = "digits"
     n: int = 10
-    random_labels: bool
+    random_labels: bool = False
     # model
     m: int = 1
     init_type: str = "standard"
@@ -18,7 +18,7 @@ class Exp1Config:
     # training
     epochs: int = 1
     eta: float  = 1.0
-    betas: list = [1.0]
+    betas: list = field(default_factory=lambda: [1.0])
     regularization_scale: float = 1.0
     # stats
     use_linearized: bool = True

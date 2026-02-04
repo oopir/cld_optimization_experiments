@@ -5,8 +5,6 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.transforms import Bbox
 
-from .data import load_1d_regression_data
-
 # ICML-style defaults: small fonts, sufficient line width, high DPI
 mpl.rcParams.update(
     {
