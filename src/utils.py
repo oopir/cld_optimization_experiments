@@ -18,7 +18,7 @@ def _get_idle_gpus(util_threshold=5):
             return None
 
     idle = [i for i, u in enumerate(utils) if u <= util_threshold]
-    return idle[:5]
+    return idle[:util_threshold]
 
 def select_idle_gpus_for_experiment(device="cuda", util_threshold=5):
     """
