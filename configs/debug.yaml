@@ -1,0 +1,27 @@
+experiment:
+  seeds: [0, 1, 2, 3, 4]
+  n: 10
+  random_labels: false
+  betas: [100, 500, 1000]
+  epochs: 300
+  eta: 1.0e-5
+  m: 159056
+  dataset: digits
+  init_type: standard
+  lam_fc1: null
+  lam_fc2: null
+  regularization_scale: 1.0
+  use_linearized: true
+  track_jacobian: true
+  jac_probe_size: 1
+  device: cuda
+  track_every: 10
+  print_every: 100
+
+run:
+  ckpt_dir: "~/cld_checkpoints/expr1"
+  ckpt_path: "~/cld_checkpoints/expr1/exp1_digits_20260205_140234.pt"
+  save_checkpoint: false
+  use_checkpoint: true
+  extend_from_checkpoint: false
+  new_epochs: 0

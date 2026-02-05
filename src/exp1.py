@@ -29,6 +29,35 @@ class Exp1RunOpts:
     new_epochs: int | None = None
 
 
+def build_from_config_mapping(cfg: dict) -> tuple[Exp1Config, Exp1RunOpts]:
+    """
+    cfg can be either:
+      {
+        "experiment": { ...fields of Exp1Config... },
+        "run":        { ...fields of Exp1RunOpts... }
+      }
+    or a flat mapping of Exp1Config fields only.
+    """
+    exp_section = cfg.get("experiment")
+    run_section = cfg.get("run")
+
+    if exp_section is None:
+        exp_kwargs = cfg
+        run_kwargs = {}
+    else:
+        exp_kwargs = exp_section
+        run_kwargs = run_section or {}
+    exp_config = Exp1Config(**exp_kwargs)
+
+    if "ckpt_dir" in run_kwargs:
+        run_kwargs["ckpt_dir"] = Path(run_kwargs["ckpt_dir"]).expanduser()
+    if "ckpt_path" in run_kwargs:
+        run_kwargs["ckpt_path"] = Path(run_kwargs["ckpt_path"]).expanduser()
+    run_opts = Exp1RunOpts(**run_kwargs)
+
+    return exp_config, run_opts
+
+
 def _write_base_ckpt_data_for_beta_to_disk(
     label: str,
     beta_results: Mapping[int, Mapping[str, Any]],
