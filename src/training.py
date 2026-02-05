@@ -251,8 +251,8 @@ def _train_multiseed_worker(
     np.random.seed(run_seed)
     random.seed(run_seed)
 
-    torch.set_num_threads(5)
-    torch.set_num_interop_threads(1)
+    # torch.set_num_threads(2)
+    # torch.set_num_interop_threads(1)
 
     if dataset == "digits":
         data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
