@@ -74,7 +74,7 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
 
     # ------------------------ actual plotting ------------------------ #
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
-    # infer x from epoch_hist if present; else fall back to track_every
+    # infer x from epoch_hist if present; else fall back to track_every (present only for perviously corrupted ckpts)
     sample_beta_key = next(iter(results.keys()))
     sample_seed_key = next(iter(results[sample_beta_key].keys()))
     sample_metrics = results[sample_beta_key][sample_seed_key]
