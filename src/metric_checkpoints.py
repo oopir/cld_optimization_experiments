@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Optional
 import torch
 
 @dataclass
@@ -13,8 +14,8 @@ class Exp1Config:
     # model
     m: int = 1
     init_type: str = "standard"
-    lam_fc1: float | None = None
-    lam_fc2: float | None = None
+    lam_fc1: Optional[float] = None
+    lam_fc2: Optional[float] = None
     # training
     epochs: int = 1
     eta: float  = 1.0
