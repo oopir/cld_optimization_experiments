@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.transforms import Bbox
 
-# ICML-style defaults: small fonts, sufficient line width, high DPI
 mpl.rcParams.update(
     {
         "figure.dpi": 300,
@@ -40,19 +39,12 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         raise RuntimeError("plot_ex1_multiseed expects Jacobian data")
 
     # ------------------------- figure config ------------------------- #
-    # ('axes' dict is used later, so don't push this section to the end)
-    # ICML-friendly multi-panel figure
-    fig = plt.figure(figsize=(8, 13.0))
-    gs = gridspec.GridSpec(4, 2, hspace=0.4, wspace=0.3)
-    ax1l = plt.subplot(gs[0, 0])
-    ax1r = plt.subplot(gs[0, 1])
-    ax2l = plt.subplot(gs[1, 0])
-    ax2r = plt.subplot(gs[1, 1])
-    ax3l = plt.subplot(gs[2, 0])
-    ax3r = plt.subplot(gs[2, 1])
-    ax4l = plt.subplot(gs[3, 0])
-    ax4r = plt.subplot(gs[3, 1])
-
+    fig  = plt.figure(figsize=(8, 13.0))
+    gs   = gridspec.GridSpec(4, 2, hspace=0.4, wspace=0.3)
+    ax1l, ax1r, ax2l, ax2r, ax3l, ax3r, ax4l, ax4r = (
+        plt.subplot(gs[0, 0]), plt.subplot(gs[0, 1]), plt.subplot(gs[1, 0]), plt.subplot(gs[1, 1]), 
+        plt.subplot(gs[2, 0]), plt.subplot(gs[2, 1]), plt.subplot(gs[3, 0]), plt.subplot(gs[3, 1]),
+    )
     axes = {
         "jacobian_dist_l2": ax1l,
         "jacobian_dist_co": ax1r,
@@ -74,6 +66,11 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         "train_loss": "training loss",
      }
     log_axes = {"feat_gram_lambda"}
+    for k, ax in axes.items():
+        ax.set_xlabel("epoch")
+        ax.set_ylabel(ylabels[k])
+        if k in log_axes:
+            ax.set_yscale("log")
 
     # ------------------------ actual plotting ------------------------ #
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
@@ -133,76 +130,29 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
             mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
             _plot_band(axes["train_loss"], x, mean, std, label="linear", color=c, lin=True, lw=1.0)
 
-    for k, ax in axes.items():
-        ax.set_xlabel("epoch")
-        ax.set_ylabel(ylabels[k])
-        if k in log_axes:
-            ax.set_yscale("log")
-        for spine in ax.spines.values():
-            spine.set_linewidth(0.8)
-
-    handles, labels = axes["train_loss"].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.95), ncol=3, frameon=False,)
+    # define legends (needs to be done after plotting for choice of placement) and "draw"
     ax1r.legend(loc="best", frameon=False, fontsize=9)
     ax2r.legend(loc="best", frameon=False, fontsize=9)
-    # ax4r.legend(loc="center", bbox_to_anchor=(0.5, 0.3), frameon=False, fontsize=7, ncol=3)
-    # ax4r.set_ylim(top=1.0)
-    plt.tight_layout(rect=[0, 0, 1, 0.93])
-
     fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
 
-    axes_list = [ax1l, ax1r, ax2l, ax2r, ax3l, ax3r, ax4l, ax4r]
-    legend = fig.legends[0] if fig.legends else None
+    # ------------------------ save all plots ------------------------- #
+    renderer  = fig.canvas.get_renderer()
+    bboxes_in = {name: ax.get_tightbbox(renderer).transformed(fig.dpi_scale_trans.inverted()) for name, ax in axes.items()}
+    max_w = max(bb.x1 - bb.x0 for bb in bboxes_in.values())
+    max_h = max(bb.y1 - bb.y0 for bb in bboxes_in.values())
+    pad_lr, pad_top, pad_bottom = 0.03, 0.05, 0.0
 
-    # --- per-axis tight bboxes in inches ---
-    bboxes_in = {}
-    widths = []
-    heights = []
+    # save each subplot separately
     for name, ax in axes.items():
-        bb = ax.get_tightbbox(renderer)
-        bb_in = bb.transformed(fig.dpi_scale_trans.inverted())
-        bboxes_in[name] = bb_in
-        widths.append(bb_in.x1 - bb_in.x0)
-        heights.append(bb_in.y1 - bb_in.y0)
-
-    max_w = max(widths)
-    max_h = max(heights)
-
-    pad_lr = 0.03   # horizontal padding (both sides)
-    pad_top = 0.05  # vertical padding at top
-    pad_bottom = 0.0  # keep bottom essentially tight
-
-    for name, ax in axes.items():
-        # show only this axis
-        for a in axes_list:
+        # make other subplots invisible (useful in case of overlapping content)
+        for a in axes.values():
             a.set_visible(a is ax)
-        # hide global legend
-        if legend is not None:
-            legend.set_visible(False)
-
+        # save subplot
         bb = bboxes_in[name]
-        # w = bb.x1 - bb.x0
-        h = bb.y1 - bb.y0
-
-        # bbox with:
-        # - same left boundary across all axes (bb.x0 - pad_lr)
-        # - same total width (max_w + 2*pad_lr)
-        # - bottom ~tight (bb.y0 - pad_bottom)
-        # - extra height added only at the top to reach max_h
-        bbox_equal = Bbox.from_extents(
-            bb.x0 - pad_lr,
-            bb.y0 - pad_bottom,
-            bb.x0 + max_w + pad_lr,
-            bb.y1 + (max_h - h) + pad_top,
-        )
-
+        bbox_equal = Bbox.from_extents(bb.x0 - pad_lr, bb.y0 - pad_bottom, bb.x0 + max_w + pad_lr, bb.y0 + max_h + pad_top)
         fig.savefig(f"expr1_{name}.pdf", bbox_inches=bbox_equal)
 
-    # restore full figure (optional)
-    for a in axes_list:
+    # restore full figure and save it
+    for a in axes.values():
         a.set_visible(True)
-    if legend is not None:
-        legend.set_visible(True)
-
     fig.savefig("expr1_full.pdf", bbox_inches="tight")
