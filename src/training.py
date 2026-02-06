@@ -212,7 +212,7 @@ def train(
                 )
 
         # ------------------ compute grads & perform steps ------------------ #
-        # NN
+        # NN forward + backward
         model.train()
         for p in params:
             if p.grad is not None:
@@ -223,9 +223,7 @@ def train(
         else:
             train_loss = loss_fn(outputs, data["y_train"])
         train_loss.backward()
-        if not use_linearized or not same_noise:
-            langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
-        # linearized model
+        # lin forward + backward
         if use_linearized:
             for p in lin_params:
                 if p.grad is not None:
@@ -236,11 +234,16 @@ def train(
             else:
                 lin_train_loss = loss_fn(lin_outputs, data["y_train"])
             lin_train_loss.backward()
-            if not same_noise:
-                langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
-            else:
+        # training step(s)
+        if not use_linearized:
+            langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+        else:
+            if same_noise:
                 joint_langevin_step(params, lam_tensors, lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
-        
+            else:
+                langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+                langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+
     metrics["rng_state"] = _save_rng_state(device)
 
     # -------------------- compute remaining stats --------------------- #
@@ -431,3 +434,4 @@ def train_multiseed(
             results[run_seed] = metrics
 
     return results
+
