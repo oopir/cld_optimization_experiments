@@ -7,7 +7,7 @@ import torch
 
 from .data import load_digits_data
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
-from .langevin import langevin_step
+from .langevin import langevin_step, joint_langevin_step
 from .linearized import (
     init_linearization,
     linearized_forward,
@@ -115,6 +115,7 @@ def train(
     lam_fc2=None,
     regularization_scale=1.0,
     use_linearized=True,
+    same_noise=False,
     track_jacobian=True,
     jac_probe_size=1,
     device="cpu",
@@ -213,6 +214,7 @@ def train(
                 )
 
         # ------------------ compute grads & perform steps ------------------ #
+        # NN backward
         model.train()
         for p in params:
             if p.grad is not None:
@@ -223,8 +225,7 @@ def train(
         else:
             train_loss = loss_fn(outputs, data["y_train"])
         train_loss.backward()
-        langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
-
+        # linearized backward
         if use_linearized:
             for p in lin_params:
                 if p.grad is not None:
@@ -235,7 +236,14 @@ def train(
             else:
                 lin_train_loss = loss_fn(lin_outputs, data["y_train"])
             lin_train_loss.backward()
-            langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+        # training step
+        if use_linearized:
+            if same_noise:
+                joint_langevin_step(params, lam_tensors, lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+            else:
+                langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+        else:
+            langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
 
     metrics["rng_state"] = _save_rng_state(device)
 
@@ -265,6 +273,7 @@ def _train_multiseed_worker(
     lam_fc2,
     regularization_scale,
     use_linearized,
+    same_noise,
     track_jacobian,
     jac_probe_size,
     track_every,
@@ -312,6 +321,7 @@ def _train_multiseed_worker(
         lam_fc2=lam_fc2,
         regularization_scale=regularization_scale,
         use_linearized=use_linearized,
+        same_noise=same_noise,
         track_jacobian=track_jacobian,
         jac_probe_size=jac_probe_size,
         device=device,
@@ -339,6 +349,7 @@ def train_multiseed(
     lam_fc2=None,
     regularization_scale=1.0,
     use_linearized=True,
+    same_noise=False,
     track_jacobian=True,
     jac_probe_size=1,
     device="cpu",
@@ -369,6 +380,7 @@ def train_multiseed(
         lam_fc2,
         regularization_scale,
         use_linearized,
+        same_noise,
         track_jacobian,
         jac_probe_size,
         track_every,

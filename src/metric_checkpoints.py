@@ -23,6 +23,7 @@ class Exp1Config:
     regularization_scale: float = 1.0
     # stats
     use_linearized: bool = True
+    same_noise: bool = False
     track_jacobian: bool = True
     jac_probe_size: int = 10
     track_every: int = 10
@@ -43,6 +44,7 @@ class Exp1Config:
             eta=self.eta,
             regularization_scale=self.regularization_scale,
             use_linearized=self.use_linearized,
+            same_noise=self.same_noise,
             track_jacobian=self.track_jacobian,
             jac_probe_size=self.jac_probe_size,
             track_every=self.track_every,

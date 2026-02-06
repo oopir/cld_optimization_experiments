@@ -12,6 +12,7 @@ experiment:
   lam_fc2: null
   regularization_scale: 1.0
   use_linearized: true
+  same_noise: false
   track_jacobian: true
   jac_probe_size: 1
   device: cuda
