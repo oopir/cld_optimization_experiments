@@ -19,7 +19,6 @@ from .stats import (
     get_stats,
     get_linear_stats,
     get_nn_lin_param_dist,
-    # compute_jacobian_dist,
     compute_dataset_ntk_drift,
     compute_dist_bound_under_GF,
     estimate_loss_floor
@@ -129,7 +128,6 @@ def train(
 
     # --------- init environment & compute values at init for stats -------- #
     X_train = data["X_train"]
-    # d = X_train.shape[1]
 
     model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0 = \
         _init_base_model_vars(data["d_in"], data["d_out"], m, init_type, device, lam_fc1, lam_fc2, init_model_state_dict)
@@ -214,7 +212,7 @@ def train(
                 )
 
         # ------------------ compute grads & perform steps ------------------ #
-        # NN backward
+        # NN
         model.train()
         for p in params:
             if p.grad is not None:
@@ -227,7 +225,7 @@ def train(
         train_loss.backward()
         if not use_linearized or not same_noise:
             langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
-        # linearized backward
+        # linearized model
         if use_linearized:
             for p in lin_params:
                 if p.grad is not None:
@@ -286,9 +284,6 @@ def _train_multiseed_worker(
         torch.cuda.manual_seed_all(run_seed)
     np.random.seed(run_seed)
     random.seed(run_seed)
-
-    # torch.set_num_threads(5)
-    # torch.set_num_interop_threads(1)
 
     if dataset == "digits":
         data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
@@ -354,9 +349,6 @@ def train_multiseed(
     track_every=1,
     print_every=100,
     gpu_ids=None,
-    # init_model_state_dicts=None,
-    # start_model_state_dicts=None,
-    # start_lin_params_dicts=None,
     resume_paths=None,
 ):
     torch.backends.cudnn.deterministic = True

@@ -9,12 +9,15 @@ def init_linearization(model, params0, lam_tensors):
     return base_params_dict, lin_params, lin_lam_tensors
 
 def linearized_forward(model, base_params_dict, lin_params, X):
+    # get (theta_t - theta_0), where theta_t is obtain from lin_params(_dict) and theta_0 is obtained from base_params_dict
     lin_params_dict = {name: p for (name, _), p in zip(model.named_parameters(), lin_params)}
     delta_params = {key: lin_params_dict[key] - base_params_dict[key] for key in base_params_dict}
 
+    # function that evaluates the NN model on x with 'params' as its parameters
     def f(params, x):
         return functional_call(model, params, (x,))
 
+    # returns both f(base_params_dict, X), and <\nabla f(base_params_dict, X)), delta_params>
     f0, jvp_out = jvp(f, (base_params_dict, X), (delta_params, torch.zeros_like(X)),)
     return f0 + jvp_out
 
