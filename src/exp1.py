@@ -21,12 +21,12 @@ EXP1_CHECKPOINT_PREFIX = "exp1_digits_"
 
 @dataclass
 class Exp1RunOpts:
-    ckpt_dir: Path
-    ckpt_path: Path | None = None
-    save_checkpoint: bool = False
-    use_checkpoint: bool = True
-    extend_from_checkpoint: bool = False
-    new_epochs: int | None = None
+    ckpt_dir:         Path
+    save_ckpt:        bool = False # for saving progress after training
+    load_ckpt:        bool = True  # for plotting/extending an existing ckpt  
+    load_ckpt_name:   Path | None = None
+    resume_from_ckpt: bool = False
+    new_total_epochs: int | None = None
 
 
 def build_from_config_mapping(cfg: dict) -> tuple[Exp1Config, Exp1RunOpts]:
@@ -136,7 +136,7 @@ def _merge_metrics(base: Mapping[str, Any], extra: Mapping[str, Any]) -> Dict[st
     return merged
 
 
-def extend_from_checkpoint(
+def resume_from_ckpt(
     base_results: ResultsByBeta,
     config: Exp1Config,
     new_epochs: int,
@@ -190,21 +190,20 @@ def extend_from_checkpoint(
 def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> Tuple[ResultsByBeta, Exp1Config]:
     run_opts.ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    if run_opts.use_checkpoint:
+    if run_opts.load_ckpt:
         # load ckpt
-        if run_opts.ckpt_path is None:
-            raise FileNotFoundError(f"checkpoint not found: {str(run_opts.ckpt_path)}")
-        base_results, exp_config = load_exp1_checkpoint(str(run_opts.ckpt_path))
-        print(f"Loaded checkpoint: {run_opts.ckpt_path}")
+        load_ckpt_path = run_opts.ckpt_dir / run_opts.load_ckpt_name
+        base_results, exp_config = load_exp1_checkpoint(str(load_ckpt_path))
+        print(f"Loaded checkpoint: {load_ckpt_path}")
 
-        if run_opts.extend_from_checkpoint:
+        if run_opts.resume_from_ckpt:
             # resume run
-            if run_opts.new_epochs is None:
-                raise ValueError("new_epochs must be set when extend_from_checkpoint is True")
-            results, exp_config = extend_from_checkpoint(
+            if run_opts.new_total_epochs is None:
+                raise ValueError("new_total_epochs must be set when resume_from_ckpt is True")
+            results, exp_config = resume_from_ckpt(
                 base_results=base_results,
                 config=exp_config,
-                new_epochs=run_opts.new_epochs,
+                new_epochs=run_opts.new_total_epochs,
                 gpu_ids=gpu_ids,
                 tmp_dir=run_opts.ckpt_dir,
             )
@@ -218,7 +217,7 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
             for beta in config.betas
         }
 
-    if run_opts.save_checkpoint:
+    if run_opts.save_ckpt:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         ckpt_path = run_opts.ckpt_dir / f"{EXP1_CHECKPOINT_PREFIX}{timestamp}.pt"
         save_exp1_checkpoint(str(ckpt_path), results, exp_config)

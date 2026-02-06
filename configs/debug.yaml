@@ -21,8 +21,8 @@ experiment:
 
 run:
   ckpt_dir: "~/cld_checkpoints/expr1"
-  ckpt_path: "~/cld_checkpoints/expr1/exp1_digits_20260205_140234.pt"
-  save_checkpoint: false
-  use_checkpoint: true
-  extend_from_checkpoint: false
-  new_epochs: 0
+  save_ckpt: false
+  load_ckpt: true
+  load_ckpt_name: "exp1_digits_20260205_140234.pt"
+  resume_from_ckpt: false
+  new_total_epochs: 0

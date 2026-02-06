@@ -34,29 +34,29 @@ def parse_args() -> argparse.Namespace:
         help="Path to YAML/JSON config file",
     )
     p.add_argument(
-        "--ckpt-path",
+        "--load-ckpt-name",
         type=Path,
         default=None,
-        help="Override run.ckpt_path from config",
+        help="Override run.load_ckpt_name from config",
     )
     p.add_argument(
-        "--new-epochs",
+        "--new-total-epochs",
         type=int,
         default=None,
-        help="Override run.new_epochs from config",
+        help="Override run.new_total_epochs from config",
     )
     p.add_argument(
-        "--no-use-checkpoint",
+        "--no-load-ckpt",
         action="store_true",
-        help="Ignore config.run.use_checkpoint and train from scratch",
+        help="Ignore config.run.load_ckpt and train from scratch",
     )
     p.add_argument(
-        "--extend-from-checkpoint",
+        "--resume-from-ckpt",
         action="store_true",
-        help="Force extending from checkpoint even if config disables it",
+        help="Force resuming from checkpoint even if config disables it",
     )
     p.add_argument(
-        "--save-checkpoint",
+        "--save-ckpt",
         action="store_true",
         help="Force saving a checkpoint at the end",
     )
@@ -75,16 +75,16 @@ def main():
     exp_config, run_opts = build_from_config_mapping(mapping)
 
     # CLI overrides config
-    if args.ckpt_path is not None:
-        run_opts.ckpt_path = args.ckpt_path
-    if args.new_epochs is not None:
-        run_opts.new_epochs = args.new_epochs
-    if args.no_use_checkpoint:
-        run_opts.use_checkpoint = False
-    if args.extend_from_checkpoint:
-        run_opts.extend_from_checkpoint = True
-    if args.save_checkpoint:
-        run_opts.save_checkpoint = True
+    if args.load_ckpt_name is not None:
+        run_opts.load_ckpt_name = args.load_ckpt_name
+    if args.new_total_epochs is not None:
+        run_opts.new_total_epochs = args.new_total_epochs
+    if args.no_load_ckpt:
+        run_opts.load_ckpt = False
+    if args.resume_from_ckpt:
+        run_opts.resume_from_ckpt = True
+    if args.save_ckpt:
+        run_opts.save_ckpt = True
 
     gpu_ids = select_idle_gpus_for_experiment(device=exp_config.device)
 
