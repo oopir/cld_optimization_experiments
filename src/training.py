@@ -225,6 +225,8 @@ def train(
         else:
             train_loss = loss_fn(outputs, data["y_train"])
         train_loss.backward()
+        if not use_linearized or not same_noise:
+            langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
         # linearized backward
         if use_linearized:
             for p in lin_params:
@@ -236,15 +238,11 @@ def train(
             else:
                 lin_train_loss = loss_fn(lin_outputs, data["y_train"])
             lin_train_loss.backward()
-        # training step
-        if use_linearized:
-            if same_noise:
-                joint_langevin_step(params, lam_tensors, lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
-            else:
+            if not same_noise:
                 langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
-        else:
-            langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
-
+            else:
+                joint_langevin_step(params, lam_tensors, lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+        
     metrics["rng_state"] = _save_rng_state(device)
 
     # -------------------- compute remaining stats --------------------- #
