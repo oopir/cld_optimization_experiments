@@ -227,21 +227,21 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
     return results, exp_config
 
 
-def infer_effective_track_every(results: ResultsByBeta, config: Exp1Config) -> int:
-    beta_key = next(iter(results))
-    seed_key = next(iter(results[beta_key]))
-    hist = results[beta_key][seed_key]["train_loss_hist"]
-    L = len(hist)
+# def infer_effective_track_every(results: ResultsByBeta, config: Exp1Config) -> int:
+#     beta_key = next(iter(results))
+#     seed_key = next(iter(results[beta_key]))
+#     hist = results[beta_key][seed_key]["train_loss_hist"]
+#     L = len(hist)
 
-    eff = config.track_every
-    if L <= 1:
-        return eff
+#     eff = config.track_every
+#     if L <= 1:
+#         return eff
 
-    E = config.epochs
-    low = (E - 1) // L + 1
-    high = (E - 1) // (L - 1)
+#     E = config.epochs
+#     low = (E - 1) // L + 1
+#     high = (E - 1) // (L - 1)
 
-    if low <= high and not low <= eff <= high:
-        eff = low
+#     if low <= high and not low <= eff <= high:
+#         eff = low
 
-    return eff
+#     return eff

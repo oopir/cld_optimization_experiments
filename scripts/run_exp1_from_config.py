@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 os.environ["PYTHONPATH"] = str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
-from src.exp1 import run_exp1, infer_effective_track_every, build_from_config_mapping
+from src.exp1 import run_exp1, build_from_config_mapping
 from src.plots import plot_ex1_multiseed
 from src.utils import select_idle_gpus_for_experiment
 
@@ -91,8 +91,7 @@ def main():
     results, final_config = run_exp1(config=exp_config, run_opts=run_opts, gpu_ids=gpu_ids)
 
     if not args.no_plot:
-        eff_track_every = infer_effective_track_every(results, final_config)
-        plot_ex1_multiseed(results, final_config.epochs, eff_track_every, final_config.use_linearized)
+        plot_ex1_multiseed(results, final_config.epochs, final_config.track_every, final_config.use_linearized)
 
 
 if __name__ == "__main__":
