@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Iterable
+import math
 
 import numpy as np
 import torch
@@ -265,7 +266,7 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
         exp_config = config
         _print_exp_config(exp_config)
         results = {
-            f"β={beta // config.n}n": _train_single_beta(config=config, beta=beta, gpu_ids=gpu_ids)
+            "β=" + ("inf" if math.isinf(beta) else f"{beta // config.n}n"): _train_single_beta(config=config, beta=beta, gpu_ids=gpu_ids)
             for beta in config.betas
         }
 
