@@ -1,11 +1,9 @@
-# from_gpt.py
-
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Iterable
 
 import numpy as np
 import torch
@@ -23,10 +21,11 @@ EXP1_CHECKPOINT_PREFIX = "exp1_digits_"
 class Exp1RunOpts:
     ckpt_dir:         Path
     save_ckpt:        bool = False # for saving progress after training
-    load_ckpt:        bool = True  # for plotting/extending an existing ckpt  
+    load_ckpt:        bool = False # for plotting/extending an existing ckpt  
     load_ckpt_name:   Path | None = None
     resume_from_ckpt: bool = False
     new_total_epochs: int | None = None
+    config_overrides: Optional[List[str]] = None
 
 
 def build_from_config_mapping(cfg: dict) -> tuple[Exp1Config, Exp1RunOpts]:
@@ -51,11 +50,55 @@ def build_from_config_mapping(cfg: dict) -> tuple[Exp1Config, Exp1RunOpts]:
 
     if "ckpt_dir" in run_kwargs:
         run_kwargs["ckpt_dir"] = Path(run_kwargs["ckpt_dir"]).expanduser()
-    if "ckpt_path" in run_kwargs:
-        run_kwargs["ckpt_path"] = Path(run_kwargs["ckpt_path"]).expanduser()
+    if "load_ckpt_name" in run_kwargs:
+        run_kwargs["load_ckpt_name"] = Path(run_kwargs["load_ckpt_name"]).expanduser()
     run_opts = Exp1RunOpts(**run_kwargs)
 
     return exp_config, run_opts
+
+
+def _apply_config_overrides(base: Exp1Config, override_src: Exp1Config, override_keys: Optional[Iterable[str]]) -> Exp1Config:
+    if not override_keys:
+        return base
+    for k in override_keys:
+        if k not in [
+            "eta", 
+            "regularization_scale", 
+            "use_linearized", 
+            "track_jacobian", 
+            "same_noise", 
+            "jac_probe_size", 
+            "device", 
+            "print_every"
+        ]:
+            raise ValueError(f"Error: overriding {k} is not supported yet.")
+    
+    base_dict = base.__dict__
+    src_dict = override_src.__dict__
+    valid_keys = set(base_dict.keys())
+    kwargs = {k: src_dict[k] for k in override_keys if (k in valid_keys and k in src_dict and k != "epochs")}
+
+    if not kwargs:
+        return base
+    return replace(base, **kwargs)
+
+
+def _print_exp_config(
+    exp_config: Exp1Config,
+    prev_config: Exp1Config | None = None,
+    override_keys: Iterable[str] | None = None,
+) -> None:
+    print("configuration:")
+
+    curr = asdict(exp_config)
+    prev = asdict(prev_config) if prev_config is not None else {}
+    override_keys = set(override_keys or ())
+
+    for k, v in curr.items():
+        if prev_config is not None and k in override_keys and k in prev and prev[k] != v:
+            print(f"  {k}: {v} (previously {prev[k]})")
+        else:
+            print(f"  {k}: {v}")
 
 
 def _write_base_ckpt_data_for_beta_to_disk(
@@ -193,13 +236,19 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
     if run_opts.load_ckpt:
         # load ckpt
         load_ckpt_path = run_opts.ckpt_dir / run_opts.load_ckpt_name
-        base_results, exp_config = load_exp1_checkpoint(str(load_ckpt_path))
+        base_results, base_config = load_exp1_checkpoint(str(load_ckpt_path))
         print(f"Loaded checkpoint: {load_ckpt_path}")
-
+        
+        # resume run if needed
         if run_opts.resume_from_ckpt:
-            # resume run
             if run_opts.new_total_epochs is None:
                 raise ValueError("new_total_epochs must be set when resume_from_ckpt is True")
+            
+            exp_config = _apply_config_overrides(base_config, config, run_opts.config_overrides)
+
+            override_keys = (run_opts.config_overrides or {}).keys()
+            _print_exp_config(exp_config, prev_config=base_config, override_keys=override_keys)
+
             results, exp_config = resume_from_ckpt(
                 base_results=base_results,
                 config=exp_config,
@@ -207,11 +256,14 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
                 gpu_ids=gpu_ids,
                 tmp_dir=run_opts.ckpt_dir,
             )
+        # otherwise, go with existing ckpt data
         else:
-            # pass ckpt data
-            results = base_results
+            exp_config = base_config
+            _print_exp_config(exp_config)
+            results = base_results 
     else:
         exp_config = config
+        _print_exp_config(exp_config)
         results = {
             f"β={beta // config.n}n": _train_single_beta(config=config, beta=beta, gpu_ids=gpu_ids)
             for beta in config.betas
