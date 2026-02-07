@@ -14,13 +14,13 @@ class Exp1Config:
     # model
     m: int = 1
     init_type: str = "standard"
-    lam_fc1: Optional[float] = None
-    lam_fc2: Optional[float] = None
     # training
     epochs: int = 1
     eta: float  = 1.0
     betas: list = field(default_factory=lambda: [1.0])
     regularization_scale: float = 1.0
+    lam_fc1: Optional[float] = None
+    lam_fc2: Optional[float] = None
     # stats
     use_linearized: bool = True
     same_noise: bool = False
