@@ -72,6 +72,7 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
     try:
         feat_gram_lambda = torch.linalg.eigvalsh(A_Gram)[0].item()
     except Exception:
+        print("Numerical instability occured when computing lambda_min of feature matrix. Defaulting to feat_gram_lambda=1.")
         feat_gram_lambda = 1
 
     return {
@@ -232,6 +233,11 @@ def estimate_lambda_min(X, M=10000, batch_g=64, device=None):
     A /= M
     A = (A + A.T) * 0.5                                     # symmetrize for numerical safety
     lam_min = torch.linalg.eigvalsh(A)[0].item()
+    try:
+        lam_min = torch.linalg.eigvalsh(A)[0].item()
+    except Exception:
+        print("Numerical instability occured in estimate_lambda_min. Defaulting to lam_min=1.")
+        lam_min = 1
     return lam_min
 
 def estimate_loss_floor(X_train, noisy_beta, m, device):
