@@ -124,6 +124,7 @@ def train(
     start_model_state_dict=None,
     start_lin_params=None,
     resume_rng_state=None,
+    epoch_offset=0,
 ):
 
     # --------- init environment & compute values at init for stats -------- #
@@ -170,12 +171,12 @@ def train(
     if resume_rng_state is not None:
         _load_rng_state(device, resume_rng_state)
 
-    print(f"training starts for {device}...", flush=True)
+    print(f"training starts for beta={beta} from epoch={epoch_offset+1} on device {device}...", flush=True)
     stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
     sup_sigma_max_v = stats["sigma_max_v"]
     # print(f"epoch {0:8d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(epoch_offset + 1, epochs + 1):
         # -------------------- compute metrics and stats -------------------- #
         model.eval()
         if epoch % track_every == 1:
@@ -278,6 +279,7 @@ def _train_multiseed_worker(
     track_every,
     print_every,
     resume_paths=None,
+    epoch_offset=0,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -327,6 +329,7 @@ def _train_multiseed_worker(
         start_model_state_dict=start_state,
         start_lin_params=start_lin_params,
         resume_rng_state=rng_state,
+        epoch_offset=epoch_offset,
     )
 
     return run_seed, metrics
@@ -351,6 +354,7 @@ def train_multiseed(
     device="cpu",
     track_every=1,
     print_every=100,
+    epoch_offset=0,
     gpu_ids=None,
     resume_paths=None,
 ):
@@ -379,6 +383,7 @@ def train_multiseed(
         track_every,
         print_every,
         resume_paths,
+        epoch_offset,
     )
 
     # create a list of gpu ids & set gpus to spawn

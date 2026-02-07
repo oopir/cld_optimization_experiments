@@ -132,10 +132,12 @@ def _train_single_beta(
     beta: float,
     gpu_ids: Optional[List[int]],
     resume_paths: Optional[Dict[int, str]] = None,
+    epoch_offset: int = 0,
 ) -> Dict[int, Metrics]:
     common = config.train_kwargs()
     common["gpu_ids"] = gpu_ids
     common["resume_paths"] = resume_paths
+    common["epoch_offset"] = epoch_offset
     results_by_seed: Dict[int, Metrics] = train_multiseed(beta=beta, **common)
     return results_by_seed
 
@@ -197,8 +199,8 @@ def resume_from_ckpt(
     resume_root.mkdir(parents=True, exist_ok=True)
 
     # train
-    extra_epochs = new_epochs - config.epochs
-    extra_cfg = replace(config, epochs=extra_epochs)
+    print(f"extending to a new total of {new_epochs} epochs...")
+    extra_cfg = replace(config, epochs=new_epochs)
     new_results: ResultsByBeta = {}
 
     for beta in config.betas:
@@ -209,7 +211,7 @@ def resume_from_ckpt(
             raise ValueError(f"Checkpoint seeds for {label} do not match config.seeds.")
 
         resume_paths = _write_base_ckpt_data_for_beta_to_disk(label, base_seed_metrics, resume_root)
-        extra_seed_metrics = _train_single_beta(extra_cfg, beta, gpu_ids, resume_paths=resume_paths)
+        extra_seed_metrics = _train_single_beta(extra_cfg, beta, gpu_ids, resume_paths=resume_paths, epoch_offset=config.epochs)
         new_results[label] = extra_seed_metrics
 
     # merge base + extra
