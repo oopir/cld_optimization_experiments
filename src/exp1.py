@@ -28,6 +28,12 @@ class Exp1RunOpts:
     new_total_epochs: int | None = None
     config_overrides: Optional[List[str]] = None
 
+def label_from_beta(beta, n=None):
+    if n is None:
+        return f"β={beta}"
+    else:
+        return "β=" + ("inf" if math.isinf(beta) else f"{beta // n}n")
+
 
 def build_from_config_mapping(cfg: dict) -> tuple[Exp1Config, Exp1RunOpts]:
     """
@@ -190,7 +196,7 @@ def resume_from_ckpt(
     # some validation
     if new_epochs <= config.epochs:
         raise ValueError(f"new_epochs ({new_epochs}) must be > existing epochs ({config.epochs})")
-    expected_labels = [f"β={beta // config.n}n" for beta in config.betas]
+    expected_labels = [label_from_beta(beta, config.n) for beta in config.betas]
     if set(base_results.keys()) != set(expected_labels):
         raise ValueError("Checkpoint betas do not match config.betas.")
 
@@ -205,7 +211,7 @@ def resume_from_ckpt(
     new_results: ResultsByBeta = {}
 
     for beta in config.betas:
-        label = f"β={beta // config.n}n"
+        label = label_from_beta(beta, config.n)
         base_seed_metrics = base_results[label]
 
         if set(base_seed_metrics.keys()) != set(config.seeds):
@@ -218,7 +224,7 @@ def resume_from_ckpt(
     # merge base + extra
     merged_results: ResultsByBeta = {}
     for beta in config.betas:
-        label = f"β={beta // config.n}n"
+        label = label_from_beta(beta, config.n)
         base_seed_metrics  = base_results[label]
         extra_seed_metrics = new_results[label]
 
@@ -266,7 +272,7 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
         exp_config = config
         _print_exp_config(exp_config)
         results = {
-            "β=" + ("inf" if math.isinf(beta) else f"{beta // config.n}n"): _train_single_beta(config=config, beta=beta, gpu_ids=gpu_ids)
+            label_from_beta(beta, config.n): _train_single_beta(config=config, beta=beta, gpu_ids=gpu_ids)
             for beta in config.betas
         }
 
