@@ -425,18 +425,20 @@ def train_multiseed(
     else:
         max_workers = min(len(seeds), len(gpu_ids))
 
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
-        futures = []
-        for i, run_seed in enumerate(seeds):
-            if gpu_ids[0] is None:
-                dev_str = base_device
-            else:
-                dev_str = f"cuda:{gpu_ids[i % len(gpu_ids)]}"  # round-robin over GPUs
-            futures.append(pool.submit(_train_multiseed_worker, dataset, run_seed, dev_str, *args_except_seeds))
+    for worker_batch_start in range(0, len(seeds), max_workers):
+        batch_seeds = seeds[worker_batch_start : worker_batch_start + max_workers]
+        with ProcessPoolExecutor(max_workers=len(batch_seeds)) as pool:
+            futures = []
+            for i, run_seed in enumerate(batch_seeds):
+                if gpu_ids[0] is None:
+                    dev_str = base_device
+                else:
+                    dev_str = f"cuda:{gpu_ids[i % len(gpu_ids)]}"  # round-robin over GPUs
+                futures.append(pool.submit(_train_multiseed_worker, dataset, run_seed, dev_str, *args_except_seeds))
 
-        for fut in futures:
-            run_seed, metrics = fut.result()
-            results[run_seed] = metrics
+            for fut in futures:
+                run_seed, metrics = fut.result()
+                results[run_seed] = metrics
 
     return results
 
