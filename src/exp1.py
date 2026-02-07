@@ -64,8 +64,6 @@ def _apply_config_overrides(base: Exp1Config, override_src: Exp1Config, override
         if k not in [
             "eta", 
             "regularization_scale", 
-            "use_linearized", 
-            "track_jacobian", 
             "same_noise", 
             "jac_probe_size", 
             "device", 
@@ -246,7 +244,7 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
             
             exp_config = _apply_config_overrides(base_config, config, run_opts.config_overrides)
 
-            override_keys = (run_opts.config_overrides or {}).keys()
+            override_keys = (run_opts.config_overrides or {})
             _print_exp_config(exp_config, prev_config=base_config, override_keys=override_keys)
 
             results, exp_config = resume_from_ckpt(
