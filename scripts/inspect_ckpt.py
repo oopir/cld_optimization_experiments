@@ -1,3 +1,5 @@
+# example run: PYTHONPATH=. python3 scripts/inspect_ckpt.py ~/cld_checkpoints/expr1/exp1_digits_20260127_135649.pt
+
 from __future__ import annotations
 
 import argparse
