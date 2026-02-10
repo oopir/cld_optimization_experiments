@@ -1,0 +1,8 @@
+# PDFs
+*.pdf
+
+# Logs
+*.log
+
+# Python cache
+src/__pycache__/
