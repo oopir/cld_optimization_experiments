@@ -66,27 +66,27 @@ def make_lambda_like_params(model, init_type, lam_fc1, lam_fc2, lam_bi1=None, la
 
     if lam_fc1 is None or lam_fc2 is None:
         if init_type == "standard":
-            lam_fc1 = tanh_gain_sq / model.d_in
-            lam_fc2 = lin_gain_sq / model.m
+            lam_fc1 = model.d_in / tanh_gain_sq
+            lam_fc2 = model.m / lin_gain_sq
         elif init_type == "mean-field":
-            lam_fc1 = tanh_gain_sq / (model.d_in**2)
-            lam_fc2 = lin_gain_sq / (model.m**2)
+            lam_fc1 = (model.d_in**2) / tanh_gain_sq
+            lam_fc2 = (model.m**2) / lin_gain_sq
         elif init_type == "alpha":
-            lam_fc1 = tanh_gain_sq / model.d_in / model.alpha
-            lam_fc2 = lin_gain_sq / model.m / model.alpha
+            lam_fc1 = (model.d_in * model.alpha) / tanh_gain_sq
+            lam_fc2 = (model.m * model.alpha) / lin_gain_sq
         else:
             raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field' or 'alpha'.")
 
     if lam_bi1 is None or lam_bi2 is None:
         if init_type == "standard":
-            lam_bi1 = tanh_gain_sq
-            lam_bi2 = lin_gain_sq
+            lam_bi1 = 1 / tanh_gain_sq
+            lam_bi2 = 1 / lin_gain_sq
         elif init_type == "mean-field":
-            lam_bi1 = tanh_gain_sq
-            lam_bi2 = lin_gain_sq
+            lam_bi1 = 1 / tanh_gain_sq
+            lam_bi2 = 1 / lin_gain_sq
         elif init_type == "alpha":
-            lam_bi1 = tanh_gain_sq / model.alpha
-            lam_bi2 = lin_gain_sq / model.alpha
+            lam_bi1 = model.alpha / tanh_gain_sq # TODO: re-evaluate this choice, both mean-field and standard should be private cases of this
+            lam_bi2 = model.alpha / lin_gain_sq
         else:
             raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field' or 'alpha'.")
 
