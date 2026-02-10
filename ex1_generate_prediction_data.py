@@ -172,6 +172,13 @@ def compute_beta_distance_matrix(payload, beta_key, metric: str = "l2"):
             for j in range(n_vec):
                 diff = vectors[i] - vectors[j]
                 D[i, j] = np.linalg.norm(diff)
+    elif metric == "cosine":
+        norms = [np.linalg.norm(v) for v in vectors]
+        for i in range(n_vec):
+            for j in range(n_vec):
+                num = float(np.dot(vectors[i], vectors[j]))
+                den = (norms[i] * norms[j]) + 1e-12
+                D[i, j] = 1.0 - num / den
     else:
         raise ValueError(f"Unsupported metric: {metric}")
 
@@ -216,19 +223,87 @@ def plot_beta_distance_heatmap(D, labels, ckpt_path, beta_key, save_dir: Optiona
     print(f"Saved distance heatmap for {beta_key} to {out_png}")
 
 
+def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), save_dir: Optional[str] = None):
+    preds_all = payload["predictions"]
+    # beta_keys = sorted(preds_all.keys())
+    beta_keys = preds_all.keys()
+    n_betas = len(beta_keys)
+    n_metrics = len(metrics)
+
+    if save_dir is None:
+        save_dir = os.path.dirname(ckpt_path)
+
+    ckpt_base = os.path.basename(ckpt_path)
+    ckpt_stem, _ = os.path.splitext(ckpt_base)
+    ckpt_fig_dir = os.path.join(save_dir, ckpt_stem)
+    os.makedirs(ckpt_fig_dir, exist_ok=True)
+
+    out_png = os.path.join(ckpt_fig_dir, "all_dist_heatmaps.png")
+
+    fig, axes = plt.subplots(n_metrics, n_betas, figsize=(3*n_betas, 3*n_metrics), constrained_layout=True)
+    axes = np.array(axes, ndmin=2)
+
+    for mi, metric in enumerate(metrics):
+        # precompute all matrices for this metric to share color scale
+        D_dict = {}
+        d_min, d_max = np.inf, -np.inf
+        for beta_key in beta_keys:
+            D, labels = compute_beta_distance_matrix(payload, beta_key, metric=metric)
+            D_dict[beta_key] = (D, labels)
+            d_min, d_max = min(d_min, float(D.min())), max(d_max, float(D.max()))
+
+        im_for_cbar = None
+        for bi, beta_key in enumerate(beta_keys):
+            # get data
+            D, labels = D_dict[beta_key]
+            
+            # set subplot
+            ax = axes[mi, bi]
+            im = ax.imshow(D, vmin=d_min, vmax=d_max)
+            im_for_cbar = im
+            ax.set_aspect("equal")
+
+            if mi == n_metrics - 1:
+                ax.set_xticks(np.arange(len(labels)))
+                ax.set_xticklabels(labels, rotation=90, fontsize=6)
+            else:
+                ax.set_xticks([])
+                ax.set_xticklabels([])
+
+            if bi == 0:
+                ax.set_yticks(np.arange(len(labels)))
+                ax.set_yticklabels(labels, fontsize=6)
+                ax.set_ylabel(metric, fontsize=9)
+            else:
+                ax.set_yticks([])
+                ax.set_yticklabels([])
+
+            if mi == 0:
+                ax.set_title(f"{beta_key}", fontsize=9)
+
+        # one colorbar per metric row
+        fig.colorbar(im_for_cbar, ax=axes[mi, :].ravel().tolist(), location="right", shrink=0.8)
+
+    fig.savefig(out_png, dpi=200)
+    plt.close(fig)
+
+    print(f"Saved all distance heatmaps to {out_png}")
+
+
 def main():
     ckpt_dir = "/home/ofirg/cld_checkpoints/expr1"
-    ckpt_name = "exp1_digits_20260208_003901.pt"
+    ckpt_name = "exp1_digits_20260210_004154.pt"
     ckpt_path = os.path.join(ckpt_dir , ckpt_name)
     payload = compute_ex1_oos_predictions(
         ckpt_path=ckpt_path,
         device="cuda",
-        save=True,
+        save=False,
         save_dir=ckpt_dir,
     )
-    for beta_key in payload["predictions"].keys():
-        D, labels = compute_beta_distance_matrix(payload, beta_key, metric="l2")
-        plot_beta_distance_heatmap(D, labels, payload["ckpt_path"], beta_key, save_dir=ckpt_dir)
+    # for beta_key in payload["predictions"].keys():
+    #     D, labels = compute_beta_distance_matrix(payload, beta_key, metric="cosine")
+    #     plot_beta_distance_heatmap(D, labels, payload["ckpt_path"], beta_key, save_dir=ckpt_dir)
+    plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), save_dir=ckpt_dir)
 
 
 if __name__ == "__main__":
