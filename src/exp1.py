@@ -13,7 +13,7 @@ from .metric_checkpoints import Exp1Config, save_exp1_checkpoint, load_exp1_chec
 from .training import train_multiseed
 
 Metrics = Dict[str, Any]
-ResultsByBeta = Dict[str, Dict[int, Metrics]]
+ResultsByLabel = Dict[str, Dict[int, Metrics]]
 
 EXP1_CHECKPOINT_PREFIX = "exp1_digits_"
 
@@ -27,12 +27,6 @@ class Exp1RunOpts:
     resume_from_ckpt: bool = False
     new_total_epochs: int | None = None
     config_overrides: Optional[List[str]] = None
-
-def label_from_beta(beta, n=None):
-    if n is None:
-        return f"β={beta}"
-    else:
-        return "β=" + ("inf" if math.isinf(beta) else f"{beta // n}n")
 
 
 def build_from_config_mapping(cfg: dict) -> tuple[Exp1Config, Exp1RunOpts]:
@@ -106,38 +100,22 @@ def _print_exp_config(
             print(f"  {k}: {v}")
 
 
-def _write_base_ckpt_data_for_beta_to_disk(
-    label: str,
-    beta_results: Mapping[int, Mapping[str, Any]],
-    resume_root: Path,
-) -> Dict[int, str]:
-    """
-    populate a tmp directory with the data needed to resume training from some saved state
-    (initial model parameters, last model (NN + linearized) parameters, randomness state)
-    """
-    beta_dir = resume_root / label.replace("β=", "beta_")
-    beta_dir.mkdir(parents=True, exist_ok=True)
-
-    resume_paths: Dict[int, str] = {}
-
-    for seed, metrics in beta_results.items():
-        payload = {
-            "init_model_state_dict": metrics["init_model_state_dict"],
-            "start_model_state_dict": metrics["model_state_dict"],
-            "start_lin_params": metrics.get("lin_params_state"),
-            "rng_state": metrics.get("rng_state"),
-        }
-        path = beta_dir / f"seed_{seed}.pt"
-        torch.save(payload, path)
-        resume_paths[seed] = str(path)
-
-    return resume_paths
+def label_from_alpha_beta(alpha=None, beta=None, n=None):
+    label = ""
+    if alpha is not None:
+        label += f"α={alpha:.0e} "
+    if n is None:
+        label += f"β={beta}"
+    else:
+        label += "β=" + ("inf" if math.isinf(beta) else f"{beta // n}n")
+    return label
 
 
-def _train_single_beta(
+def _train_single_alpha_beta(
     config: Exp1Config,
-    beta: float,
-    gpu_ids: Optional[List[int]],
+    alpha: float = 1.0,
+    beta: float = np.inf,
+    gpu_ids: Optional[List[int]] = None,
     resume_paths: Optional[Dict[int, str]] = None,
     epoch_offset: int = 0,
 ) -> Dict[int, Metrics]:
@@ -145,8 +123,82 @@ def _train_single_beta(
     common["gpu_ids"] = gpu_ids
     common["resume_paths"] = resume_paths
     common["epoch_offset"] = epoch_offset
-    results_by_seed: Dict[int, Metrics] = train_multiseed(beta=beta, **common)
+    results_by_seed: Dict[int, Metrics] = train_multiseed(alpha=alpha, beta=beta, **common)
     return results_by_seed
+
+
+def _write_base_ckpt_data_for_beta_to_disk(
+    label: str,
+    base_seed_metrics: Mapping[int, Mapping[str, Any]],
+    resume_root: Path,
+) -> Dict[int, str]:
+    """
+    populate a tmp directory with the data needed to resume training from some saved state
+    (initial model parameters, last model (NN + linearized) parameters, randomness state)
+    """
+    dirr = resume_root / label.replace("α=", "alpha_").replace("β=", "beta_")
+    dirr.mkdir(parents=True, exist_ok=True)
+
+    resume_paths: Dict[int, str] = {}
+
+    for seed, metrics in base_seed_metrics.items():
+        payload = {
+            "init_model_state_dict": metrics["init_model_state_dict"],
+            "start_model_state_dict": metrics["model_state_dict"],
+            "start_lin_params": metrics.get("lin_params_state"),
+            "rng_state": metrics.get("rng_state"),
+        }
+        path = dirr / f"seed_{seed}.pt"
+        torch.save(payload, path)
+        resume_paths[seed] = str(path)
+
+    return resume_paths
+
+
+def _train_over_range(
+    config: Exp1Config,
+    alpha_range: list = [],
+    beta_range: list = [],
+    gpu_ids: Optional[List[int]] = None,
+    resume_root = None,
+    base_results = None,
+    epoch_offset: int = 0,
+) -> Dict[int, Metrics]: 
+    
+    results: ResultsByLabel = {}
+    
+    if len(alpha_range) == 0:
+        for beta in beta_range:
+            label = label_from_alpha_beta(beta=beta, n=config.n)
+            resume_paths = None
+            if base_results != None:
+                resume_paths = _write_base_ckpt_data_for_beta_to_disk(label, base_results[label], resume_root)
+            metrics = _train_single_alpha_beta(
+                config, 
+                beta=beta, 
+                gpu_ids=gpu_ids, 
+                resume_paths=resume_paths, 
+                epoch_offset=epoch_offset
+            )
+            results[label] = metrics
+    else:
+        for alpha in alpha_range:
+            for beta in beta_range:
+                label = label_from_alpha_beta(alpha=alpha, beta=beta, n=config.n)
+                resume_paths = None
+                if base_results != None:
+                    resume_paths = _write_base_ckpt_data_for_beta_to_disk(label, base_results[label], resume_root)
+                metrics = _train_single_alpha_beta(
+                    config, 
+                    alpha=alpha, 
+                    beta=beta, 
+                    gpu_ids=gpu_ids, 
+                    resume_paths=resume_paths, 
+                    epoch_offset=epoch_offset
+                )
+                results[label] = metrics
+    
+    return results
 
 
 def _merge_metrics(base: Mapping[str, Any], extra: Mapping[str, Any]) -> Dict[str, Any]:
@@ -187,18 +239,25 @@ def _merge_metrics(base: Mapping[str, Any], extra: Mapping[str, Any]) -> Dict[st
 
 
 def resume_from_ckpt(
-    base_results: ResultsByBeta,
+    base_results: ResultsByLabel,
     config: Exp1Config,
     new_epochs: int,
     gpu_ids: List[int],
     tmp_dir: Path,
-) -> Tuple[ResultsByBeta, Exp1Config]:
+) -> Tuple[ResultsByLabel, Exp1Config]:
     # some validation
     if new_epochs <= config.epochs:
         raise ValueError(f"new_epochs ({new_epochs}) must be > existing epochs ({config.epochs})")
-    expected_labels = [label_from_beta(beta, config.n) for beta in config.betas]
+    if len(config.alphas) == 0:
+        expected_labels = [label_from_alpha_beta(beta=beta, n=config.n) for beta in config.betas]
+    else:
+        expected_labels = [
+            label_from_alpha_beta(alpha=alpha, beta=beta, n=config.n)
+            for alpha in config.alphas
+            for beta in config.betas
+        ]
     if set(base_results.keys()) != set(expected_labels):
-        raise ValueError("Checkpoint betas do not match config.betas.")
+        raise ValueError("Checkpoint alpha/betas do not match config.alphas/config.betas.")
 
     # create tmp directory for passing data to child processes
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -208,23 +267,11 @@ def resume_from_ckpt(
     # train
     print(f"extending to a new total of {new_epochs} epochs...")
     extra_cfg = replace(config, epochs=new_epochs)
-    new_results: ResultsByBeta = {}
+    new_results: ResultsByLabel = _train_over_range(extra_cfg, [], config.betas, gpu_ids, resume_root, base_results, config.epochs)
 
-    for beta in config.betas:
-        label = label_from_beta(beta, config.n)
-        base_seed_metrics = base_results[label]
-
-        if set(base_seed_metrics.keys()) != set(config.seeds):
-            raise ValueError(f"Checkpoint seeds for {label} do not match config.seeds.")
-
-        resume_paths = _write_base_ckpt_data_for_beta_to_disk(label, base_seed_metrics, resume_root)
-        extra_seed_metrics = _train_single_beta(extra_cfg, beta, gpu_ids, resume_paths=resume_paths, epoch_offset=config.epochs)
-        new_results[label] = extra_seed_metrics
-
-    # merge base + extra
-    merged_results: ResultsByBeta = {}
-    for beta in config.betas:
-        label = label_from_beta(beta, config.n)
+    # merge base + new
+    merged_results: ResultsByLabel = {}
+    for label in expected_labels:
         base_seed_metrics  = base_results[label]
         extra_seed_metrics = new_results[label]
 
@@ -237,7 +284,7 @@ def resume_from_ckpt(
     return merged_results, new_config
 
 
-def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> Tuple[ResultsByBeta, Exp1Config]:
+def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> Tuple[ResultsByLabel, Exp1Config]:
     run_opts.ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     if run_opts.load_ckpt:
@@ -271,10 +318,7 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
     else:
         exp_config = config
         _print_exp_config(exp_config)
-        results = {
-            label_from_beta(beta, config.n): _train_single_beta(config=config, beta=beta, gpu_ids=gpu_ids)
-            for beta in config.betas
-        }
+        results = _train_over_range(config, [], config.betas, gpu_ids)
 
     if run_opts.save_ckpt:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -286,7 +330,7 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
 
 
 # required for plotting the ICML-deadline ckpt
-def infer_effective_track_every(results: ResultsByBeta, config: Exp1Config) -> int:
+def infer_effective_track_every(results: ResultsByLabel, config: Exp1Config) -> int:
     beta_key = next(iter(results))
     seed_key = next(iter(results[beta_key]))
     hist = results[beta_key][seed_key]["train_loss_hist"]

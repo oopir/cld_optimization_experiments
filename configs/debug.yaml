@@ -2,18 +2,17 @@ experiment:
   seeds: [0, 1, 2, 3, 4]
   n: 10
   random_labels: false
-  betas: [100, 500, 1000]
+  alphas: [1]
+  betas: [.inf]
   epochs: 300
   eta: 1.0e-5
-  m: 159056
-  dataset: digits
+  m: 160000
+  dataset: mnist
   init_type: standard
-  lam_fc1: null
-  lam_fc2: null
   regularization_scale: 1.0
-  use_linearized: true
+  use_linearized: false
   same_noise: false
-  track_jacobian: true
+  track_jacobian: false
   jac_probe_size: 1
   device: cuda
   track_every: 10

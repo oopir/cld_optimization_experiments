@@ -17,7 +17,8 @@ class Exp1Config:
     # training
     epochs: int = 1
     eta: float  = 1.0
-    betas: list = field(default_factory=lambda: [1.0])
+    betas: list = field(default_factory=lambda: [])
+    alphas: list = field(default_factory=lambda: [])
     regularization_scale: float = 1.0
     lam_fc1: Optional[float] = None
     lam_fc2: Optional[float] = None

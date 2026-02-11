@@ -5,7 +5,7 @@ import random
 import numpy as np
 import torch
 
-from .data import load_digits_data
+from .data import load_digits_data, load_mnist_data
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
 from .langevin import langevin_step, joint_langevin_step
 from .linearized import (
@@ -53,9 +53,9 @@ def _load_rng_state(device: str, state):
             idx = torch.cuda.current_device()
         torch.cuda.set_rng_state(cuda_state, device=idx)
 
-def _init_base_model_vars(d_in, d_out, m, init_type, device, lam_fc1, lam_fc2, init_model_state_dict=None):
+def _init_base_model_vars(d_in, d_out, m, init_type, alpha, device, lam_fc1, lam_fc2, init_model_state_dict=None):
 
-    model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, init_type=init_type).to(device)
+    model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, init_type=init_type, alpha=alpha).to(device)
     if init_model_state_dict is not None:
         model.load_state_dict(init_model_state_dict)
     params, lam_tensors = make_lambda_like_params(model, init_type, lam_fc1=lam_fc1, lam_fc2=lam_fc2)
@@ -81,10 +81,10 @@ def _init_linearization_vars(model, params0, lam_tensors):
 
     return (base_params_dict, lin_params, lin_lam_tensors, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0)
 
-def _init_jacobian_track_vars(d, d_out, m, init_type, device, model, X_train, probe_bs):
+def _init_jacobian_track_vars(d, d_out, m, init_type, alpha, device, model, X_train, probe_bs):
     # model_at_init is made in case we will want to track Jacobian
     # drift w.r.t. full Jacobian and not just a partial probe
-    model_at_init = TwoLayerNet(d_in=d, m=m, d_out=d_out, init_type=init_type).to(device)
+    model_at_init = TwoLayerNet(d_in=d, m=m, d_out=d_out, init_type=init_type, alpha=alpha).to(device)
     model_at_init.load_state_dict(model.state_dict())
 
     X_probe = X_train[:probe_bs].to(device)
@@ -110,6 +110,7 @@ def train(
     beta,
     m,
     init_type="standard",
+    alpha=1.0,
     lam_fc1=None,
     lam_fc2=None,
     regularization_scale=1.0,
@@ -131,7 +132,7 @@ def train(
     X_train = data["X_train"]
 
     model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0 = \
-        _init_base_model_vars(data["d_in"], data["d_out"], m, init_type, device, lam_fc1, lam_fc2, init_model_state_dict)
+        _init_base_model_vars(data["d_in"], data["d_out"], m, init_type, alpha, device, lam_fc1, lam_fc2, init_model_state_dict)
 
     if init_model_state_dict is not None:
         init_state_for_metrics = {k: v.detach().cpu() for k, v in init_model_state_dict.items()}
@@ -151,7 +152,7 @@ def train(
         # model_at_init, X_probe, jac_init, jac_init_norm_sq = \
         #     _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, device, model, X_train, jac_probe_size)
         model_at_init, _, _, _ = \
-            _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, device, model, X_train, jac_probe_size)
+            _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, alpha, device, model, X_train, jac_probe_size)
 
 
     with torch.no_grad():
@@ -269,6 +270,7 @@ def _train_multiseed_worker(
     beta,
     m,
     init_type,
+    alpha,
     lam_fc1,
     lam_fc2,
     regularization_scale,
@@ -292,6 +294,8 @@ def _train_multiseed_worker(
 
     if dataset == "digits":
         data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
+    elif dataset == "mnist":
+        data = load_mnist_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
 
@@ -315,6 +319,7 @@ def _train_multiseed_worker(
         beta=beta,
         m=m,
         init_type=init_type,
+        alpha=alpha,
         lam_fc1=lam_fc1,
         lam_fc2=lam_fc2,
         regularization_scale=regularization_scale,
@@ -344,6 +349,7 @@ def train_multiseed(
     beta,
     m,
     init_type="standard",
+    alpha=1.0,
     lam_fc1=None,
     lam_fc2=None,
     regularization_scale=1.0,
@@ -373,6 +379,7 @@ def train_multiseed(
         beta,
         m,
         init_type,
+        alpha,
         lam_fc1,
         lam_fc2,
         regularization_scale,
