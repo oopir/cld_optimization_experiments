@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 
 class TwoLayerNet(nn.Module):
+    # don't rely on alpha's default value, as train_multiseed also has a 
+    # default alpha value and it will always override the value in here...
     def __init__(self, d_in, m, d_out=10, with_bias=False, init_type="standard", alpha=1, act="tanh"):
         super().__init__()
         self.d_in = d_in
