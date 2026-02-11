@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 
@@ -16,32 +17,34 @@ class TwoLayerNet(nn.Module):
             raise ValueError(f"Unknown act='{act}' Use 'tanh' or 'relu'.")
         self.act = act
 
-        #purposefully located here so "alpha" scaling will happen after bias init
-        if with_bias:
-            with torch.no_grad():
-                self.fc1.bias.normal_(0.0, nn.init.calculate_gain(self.act))
-                self.fc2.bias.normal_(0.0, nn.init.calculate_gain("linear"))
-
+        # init weights
+        torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity=self.act)
+        torch.nn.init.kaiming_normal_(self.fc2.weight, mode="fan_in", nonlinearity="linear")
         if init_type == "standard":
-            torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity=self.act)
-            torch.nn.init.kaiming_normal_(self.fc2.weight, mode="fan_in", nonlinearity="linear")
+            pass
         elif init_type == "mean-field":
             with torch.no_grad():
-                self.fc1.weight.normal_(0.0, nn.init.calculate_gain(self.act) / d_in)
-                self.fc2.weight.normal_(0.0, nn.init.calculate_gain("linear") / m)
+                self.fc1.weight.mul_(1 / math.sqrt(d_in))
+                self.fc2.weight.mul_(1 / math.sqrt(m))
         elif init_type == "alpha":
-            torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity=self.act)
-            torch.nn.init.kaiming_normal_(self.fc2.weight, mode="fan_in", nonlinearity="linear")
-
             with torch.no_grad():
+                # kernel-vs-rich, figure 6 caption: "The weights of the network are set using 
+                # the Uniform He initialization, and then multiplied by α" (this means std is multiplied by α)
                 self.fc1.weight.mul_(self.alpha)
                 self.fc2.weight.mul_(self.alpha)
-                if self.fc1.bias is not None:
-                    self.fc1.bias.mul_(self.alpha)
-                if self.fc2.bias is not None:
-                    self.fc2.bias.mul_(self.alpha)
         else:
             raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field' or 'alpha'.")
+
+        # init biases
+        # Daniel: "biases are same as the weights (just have 1 as input)"
+        if with_bias:
+            with torch.no_grad():
+                self.fc1.bias.normal_(mean=0.0, std=nn.init.calculate_gain(self.act))
+                self.fc2.bias.normal_(mean=0.0, std=nn.init.calculate_gain("linear"))
+                if init_type == "alpha":
+                    self.fc1.bias.mul_(self.alpha)
+                    self.fc2.bias.mul_(self.alpha)
+
 
     def forward(self, x):
         x = self.fc1(x)
@@ -72,21 +75,17 @@ def make_lambda_like_params(model, init_type, lam_fc1, lam_fc2, lam_bi1=None, la
             lam_fc1 = (model.d_in**2) / tanh_gain_sq
             lam_fc2 = (model.m**2) / lin_gain_sq
         elif init_type == "alpha":
-            lam_fc1 = (model.d_in * model.alpha) / tanh_gain_sq
-            lam_fc2 = (model.m * model.alpha) / lin_gain_sq
+            lam_fc1 = (model.d_in / tanh_gain_sq) / model.alpha**2
+            lam_fc2 = (model.m / lin_gain_sq) / model.alpha**2
         else:
             raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field' or 'alpha'.")
 
     if lam_bi1 is None or lam_bi2 is None:
-        if init_type == "standard":
-            lam_bi1 = 1 / tanh_gain_sq
-            lam_bi2 = 1 / lin_gain_sq
-        elif init_type == "mean-field":
-            lam_bi1 = 1 / tanh_gain_sq
-            lam_bi2 = 1 / lin_gain_sq
-        elif init_type == "alpha":
-            lam_bi1 = model.alpha / tanh_gain_sq # TODO: re-evaluate this choice, both mean-field and standard should be private cases of this
-            lam_bi2 = model.alpha / lin_gain_sq
+        lam_bi1 = 1 / tanh_gain_sq
+        lam_bi2 = 1 / lin_gain_sq
+        if init_type == "alpha":
+            lam_bi1 /= model.alpha**2
+            lam_bi2 /= model.alpha**2
         else:
             raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field' or 'alpha'.")
 
