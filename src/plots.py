@@ -35,8 +35,8 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         any("jacobian_dist_hist" in r for r in run_results_by_seed.values())
         for run_results_by_seed in results.values()
     )
-    if not has_jacobian_any:
-        raise RuntimeError("plot_ex1_multiseed expects Jacobian data")
+    # if not has_jacobian_any:
+    #     raise RuntimeError("plot_ex1_multiseed expects Jacobian data")
 
     # ------------------------- figure config ------------------------- #
     fig  = plt.figure(figsize=(8, 13.0))
@@ -88,15 +88,16 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         c = next(colors)
 
         # jacobian distances
-        jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]
-        jac_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
-        l2_mean = jac_arr[:, :, 0].mean(axis=0)
-        l2_std  = jac_arr[:, :, 0].std(axis=0)
-        l2_mean[0] = max(l2_mean[0], 1e-12)
-        _plot_band(axes["jacobian_dist_l2"], x, l2_mean, l2_std, label=run_name, color=c)
-        co_mean = jac_arr[:, :, 1].mean(axis=0)
-        co_std  = jac_arr[:, :, 1].std(axis=0)
-        _plot_band(axes["jacobian_dist_co"], x, co_mean, co_std, label=run_name, color=c)
+        if has_jacobian_any:
+            jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]
+            jac_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
+            l2_mean = jac_arr[:, :, 0].mean(axis=0)
+            l2_std  = jac_arr[:, :, 0].std(axis=0)
+            l2_mean[0] = max(l2_mean[0], 1e-12)
+            _plot_band(axes["jacobian_dist_l2"], x, l2_mean, l2_std, label=run_name, color=c)
+            co_mean = jac_arr[:, :, 1].mean(axis=0)
+            co_std  = jac_arr[:, :, 1].std(axis=0)
+            _plot_band(axes["jacobian_dist_co"], x, co_mean, co_std, label=run_name, color=c)
 
         # param distances
         if use_linearized:

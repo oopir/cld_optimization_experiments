@@ -103,6 +103,19 @@ def _init_metrics(track_jacobian):
     metrics["nn_lin_param_dist_hist"] = []
     return metrics
 
+def _forward_backward(model, data, batch_size=1024):
+    X_train = data["X_train"]
+    N = X_train.size(0)
+    for start in range(0, N, batch_size):
+        end = start + batch_size
+
+        xb = X_train[start:end]
+        yb = data["y_train_one_hot"][start:end] if "y_train_one_hot" in data else data["y_train"][start:end]
+
+        outputs = model(xb)
+        loss = loss_fn(outputs, yb) * (len(xb) / N)
+        loss.backward()
+
 def train(
     data,
     eta,
@@ -180,7 +193,7 @@ def train(
     for epoch in range(epoch_offset + 1, epochs + 1):
         # -------------------- compute metrics and stats -------------------- #
         model.eval()
-        if epoch % track_every == 1:
+        if track_every == 1 or epoch % track_every == 1:
             stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
             for name in BASE_METRIC_NAMES:
                 metrics[f"{name}_hist"].append(stats[name])
@@ -203,7 +216,7 @@ def train(
                 nn_lin_param_dist = get_nn_lin_param_dist(params, lin_params)
                 metrics["nn_lin_param_dist_hist"].append(nn_lin_param_dist)
 
-            if epoch % print_every == 1:
+            if print_every == 1 or epoch % print_every == 1:
                 print(
                     f"device {device} | "
                     f"epoch {epoch:8d} | "
@@ -219,12 +232,7 @@ def train(
         for p in params:
             if p.grad is not None:
                 p.grad.zero_()
-        outputs = model(X_train)
-        if "y_train_one_hot" in data:
-            train_loss = loss_fn(outputs, data["y_train_one_hot"])
-        else:
-            train_loss = loss_fn(outputs, data["y_train"])
-        train_loss.backward()
+        _forward_backward(model, data, batch_size=1024)
         # lin forward + backward
         if use_linearized:
             for p in lin_params:

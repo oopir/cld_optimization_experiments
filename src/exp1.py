@@ -15,7 +15,7 @@ from .training import train_multiseed
 Metrics = Dict[str, Any]
 ResultsByLabel = Dict[str, Dict[int, Metrics]]
 
-EXP1_CHECKPOINT_PREFIX = "exp1_digits_"
+EXP1_CHECKPOINT_PREFIX = "exp1_"
 
 
 @dataclass
@@ -322,7 +322,7 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
 
     if run_opts.save_ckpt:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        ckpt_path = run_opts.ckpt_dir / f"{EXP1_CHECKPOINT_PREFIX}{timestamp}.pt"
+        ckpt_path = run_opts.ckpt_dir / f"{EXP1_CHECKPOINT_PREFIX}_{exp_config.dataset}_{timestamp}.pt"
         save_exp1_checkpoint(str(ckpt_path), results, exp_config)
         print(f"Saved checkpoint: {ckpt_path}")
 

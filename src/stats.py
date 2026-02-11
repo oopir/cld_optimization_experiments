@@ -37,20 +37,33 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
         y_train_one_hot = data["y_train_one_hot"]
     else:
         y_train_one_hot = None
+    batch_size = 1024
+    
+    # ---- train metrics ----
+    N_train = X_train.size(0)
+    total_correct_train = 0
+    total_loss_train = 0.0
+    for start in range(0, N_train, batch_size):
+        end = start + batch_size
+        xb  = X_train[start:end]
+        yb  = y_train[start:end] if y_train_one_hot is None else y_train_one_hot[start:end]
+        out = model(xb)
+        total_correct_train += (out.argmax(dim=1) == y_train[start:end]).sum().item()
+        total_loss_train += loss_fn(out, yb).item() * len(xb)
 
-    train_outputs = model(X_train)
-    pred_train = train_outputs.argmax(dim=1)
-    train_acc = (pred_train == y_train).float().mean().item()
+    train_acc = total_correct_train / N_train
+    train_loss = total_loss_train / N_train
 
-    test_outputs = model(X_test)
-    pred_test = test_outputs.argmax(dim=1)
-    test_acc = (pred_test == y_test).float().mean().item()
-
-    if y_train_one_hot is not None:
-        train_loss = loss_fn(train_outputs, y_train_one_hot).item()
-    else:
-        train_loss = loss_fn(train_outputs, y_train).item()
-
+    # ---- test metrics ----
+    N_test = X_test.size(0)
+    total_correct_test = 0
+    for start in range(0, N_test, batch_size):
+        end = start + batch_size
+        xb  = X_test[start:end]
+        out = model(xb)
+        total_correct_test += (out.argmax(dim=1) == y_test[start:end]).sum().item()
+    test_acc = total_correct_test / N_test
+    
     param_dist = torch.sqrt(sum((p-p0).pow(2).sum() for p, p0 in zip(params, params0))).item()
     param_norm = torch.sqrt(sum(p.pow(2).sum() for p in params)).item()
     fc1_norm = torch.sqrt(params[0].pow(2).sum()).item()
@@ -58,22 +71,25 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
 
     sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
 
-    A_t = torch.tanh(model.fc1(X_train))
-    dist = (A_t - A0).norm().item()
-    feat_rel_dist = dist / (A0_norm + 1e-12)
+    # A_t = torch.tanh(model.fc1(X_train))
+    # dist = (A_t - A0).norm().item()
+    # feat_rel_dist = dist / (A0_norm + 1e-12)
 
-    v_t = A_t.view(-1)
-    v0 = A0.view(-1)
-    cos_sim = F.cosine_similarity(v_t, v0, dim=0).item()
-    feat_cos_dist = 1.0 - cos_sim
+    # v_t = A_t.view(-1)
+    # v0 = A0.view(-1)
+    # cos_sim = F.cosine_similarity(v_t, v0, dim=0).item()
+    # feat_cos_dist = 1.0 - cos_sim
 
-    A_Gram = A_t @ A_t.T
-    A_Gram = 0.5 * (A_Gram + A_Gram.T)  # numerical symmetrization
-    try:
-        feat_gram_lambda = torch.linalg.eigvalsh(A_Gram)[0].item()
-    except Exception:
-        print("Numerical instability occured when computing lambda_min of feature matrix. Defaulting to feat_gram_lambda=1.")
-        feat_gram_lambda = 1
+    # A_Gram = A_t @ A_t.T
+    # A_Gram = 0.5 * (A_Gram + A_Gram.T)  # numerical symmetrization
+    # try:
+    #     feat_gram_lambda = torch.linalg.eigvalsh(A_Gram)[0].item()
+    # except Exception:
+    #     print("Numerical instability occured when computing lambda_min of feature matrix. Defaulting to feat_gram_lambda=1.")
+    #     feat_gram_lambda = 1
+    feat_rel_dist = 1
+    feat_cos_dist = 1
+    feat_gram_lambda = 1
 
     return {
         "train_loss": train_loss,

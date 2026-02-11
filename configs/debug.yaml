@@ -1,15 +1,15 @@
 experiment:
-  seeds: [0, 1, 2, 3, 4]
-  n: 10
+  seeds: [0]
+  n: 10000
   random_labels: false
   alphas: [1]
   betas: [.inf]
-  epochs: 300
+  epochs: 500
   eta: 1.0e-5
-  m: 160000
+  m: 10000
   dataset: mnist
   init_type: standard
-  regularization_scale: 1.0
+  regularization_scale: 0
   use_linearized: false
   same_noise: false
   track_jacobian: false
@@ -21,7 +21,7 @@ experiment:
 run:
   ckpt_dir: "~/cld_checkpoints/expr1"
   save_ckpt: false
-  load_ckpt: true
-  load_ckpt_name: "exp1_digits_20260205_140234.pt"
+  load_ckpt: false
+  load_ckpt_name: ".pt"
   resume_from_ckpt: false
   new_total_epochs: 0
