@@ -88,8 +88,6 @@ def make_lambda_like_params(model, init_type, lam_fc1, lam_fc2, lam_bi1=None, la
         if init_type == "alpha":
             lam_bi1 /= model.alpha**2
             lam_bi2 /= model.alpha**2
-        else:
-            raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field' or 'alpha'.")
 
 
     lam_tensors = []

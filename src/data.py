@@ -12,7 +12,7 @@ def load_digits_data(n, random_labels=False, device="cpu", seed=42):
     y = digits.target.astype(np.int64)
 
     X_train, X_tmp, y_train, y_tmp = train_test_split(X, y, train_size=n, stratify=y, random_state=seed)
-    X_test, _, y_test, _ = train_test_split(X_tmp, y_tmp, test_size=max(10, n//5), stratify=y_tmp, random_state=seed)
+    _, X_test, _, y_test = train_test_split(X_tmp, y_tmp, test_size=max(100, n//5), stratify=y_tmp, random_state=seed)
 
     if random_labels:
         y_train = np.random.randint(0, 10, size=n)
@@ -47,7 +47,7 @@ def load_mnist_data(n, random_labels=False, device="cpu", seed=42):
 
     if n*(6/5) < 60000:
         X_train, X_tmp, y_train, y_tmp = train_test_split(X, y, train_size=n, stratify=y, random_state=seed)
-        X_test, _, y_test, _ = train_test_split(X_tmp, y_tmp, test_size=max(10, n//5), stratify=y_tmp, random_state=seed)
+        _, X_test, _, y_test = train_test_split(X_tmp, y_tmp, test_size=max(100, n//5), stratify=y_tmp, random_state=seed)
     else:
         X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.8, stratify=y, random_state=seed)
       
