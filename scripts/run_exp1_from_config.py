@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 import yaml
+from datetime import datetime
 
 ROOT = Path.cwd()
 if str(ROOT) not in sys.path:
@@ -98,4 +99,6 @@ def main():
 
 
 if __name__ == "__main__":
+    print(datetime.now())
     main()
+    print(datetime.now())
