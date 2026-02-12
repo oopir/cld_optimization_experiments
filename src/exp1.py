@@ -421,7 +421,7 @@ def _train_over_range(
     resume_root = None,
     base_results = None,
     epoch_offset: int = 0,
-) -> Dict[int, Metrics]: 
+) -> Dict[str, Metrics]: 
     
     results: ResultsByLabel = {}
     
@@ -525,7 +525,7 @@ def resume_from_ckpt(
     # train
     print(f"extending to a new total of {new_epochs} epochs...")
     extra_cfg = replace(config, epochs=new_epochs)
-    new_results: ResultsByLabel = _train_over_range(extra_cfg, [], config.betas, gpu_ids, resume_root, base_results, config.epochs)
+    new_results: ResultsByLabel = _train_over_range(extra_cfg, config.alphas, config.betas, gpu_ids, resume_root, base_results, config.epochs)
 
     # merge base + new
     merged_results: ResultsByLabel = {}
@@ -576,7 +576,7 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
     else:
         exp_config = config
         _print_exp_config(exp_config)
-        results = _train_over_range(config, [], config.betas, gpu_ids)
+        results = _train_over_range(config, config.alphas, config.betas, gpu_ids)
 
     if run_opts.save_ckpt:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
