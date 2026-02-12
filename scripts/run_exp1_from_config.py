@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 os.environ["PYTHONPATH"] = str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
-from src.exp1 import run_exp1, build_from_config_mapping
+from src.exp1 import run_exp1, build_from_config_mapping, tune_eta_for_exp1
 from src.plots import plot_ex1_multiseed
 from src.utils import select_idle_gpus_for_experiment
 
@@ -88,10 +88,13 @@ def main():
 
     gpu_ids = select_idle_gpus_for_experiment(device=exp_config.device)
 
-    results, final_config = run_exp1(config=exp_config, run_opts=run_opts, gpu_ids=gpu_ids)
-
-    if not args.no_plot:
-        plot_ex1_multiseed(results, final_config.epochs, final_config.track_every, final_config.use_linearized)
+    eta_tuning_cfg = mapping.get("eta_tuning")
+    if eta_tuning_cfg and eta_tuning_cfg.get("enabled", False):
+        tune_eta_for_exp1(exp_config, eta_tuning_cfg, gpu_ids=gpu_ids)
+    else:
+        results, final_config = run_exp1(config=exp_config, run_opts=run_opts, gpu_ids=gpu_ids)
+        if not args.no_plot:
+            plot_ex1_multiseed(results, final_config.epochs, final_config.track_every, final_config.use_linearized)
 
 
 if __name__ == "__main__":

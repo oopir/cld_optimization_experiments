@@ -17,6 +17,9 @@ class Exp1Config:
     # training
     epochs: int = 1
     eta: float  = 1.0
+    eta_mode: str = "scalar"               # "scalar", "per_beta", "per_alpha_beta"
+    eta_table_path: Optional[str] = None   # path to YAML table
+    eta_default: Optional[float] = None    # fallback if key missing (defaults to eta if None)
     betas: list = field(default_factory=lambda: [])
     alphas: list = field(default_factory=lambda: [])
     regularization_scale: float = 1.0
