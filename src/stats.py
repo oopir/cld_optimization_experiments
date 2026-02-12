@@ -69,7 +69,8 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
     fc1_norm = torch.sqrt(params[0].pow(2).sum()).item()
     fc2_norm = torch.sqrt(params[1].pow(2).sum()).item()
 
-    sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
+    # sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
+    sigma_max_v = 1
 
     # A_t = torch.tanh(model.fc1(X_train))
     # dist = (A_t - A0).norm().item()

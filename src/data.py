@@ -2,6 +2,12 @@ from sklearn.datasets import load_digits, fetch_openml
 from sklearn.model_selection import train_test_split
 import torch
 import numpy as np
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    module="sklearn.datasets._openml",
+)
 
 def load_digits_data(n, random_labels=False, device="cpu", seed=42):
     digits = load_digits()
