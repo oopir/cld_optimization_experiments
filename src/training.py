@@ -185,7 +185,7 @@ def train(
     if resume_rng_state is not None:
         _load_rng_state(device, resume_rng_state)
 
-    print(f"training starts for beta={beta} from epoch={epoch_offset+1} on device {device}...", flush=True)
+    print(f"training starts for alpha={alpha}, beta={beta}, eta={eta} from epoch={epoch_offset+1} on device {device}...", flush=True)
     stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
     sup_sigma_max_v = stats["sigma_max_v"]
     # print(f"epoch {0:8d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
@@ -347,6 +347,7 @@ def _train_multiseed_worker(
 
     return run_seed, metrics
 
+# note to self - do not forget that the argument order matters because of how we call this function
 def train_multiseed(
     dataset,
     seeds,
