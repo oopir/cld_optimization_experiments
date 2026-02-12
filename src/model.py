@@ -57,6 +57,8 @@ class TwoLayerNet(nn.Module):
         else:
             raise ValueError(f"Model's 'forward' does not support activation '{self.act}'.")
         x = self.fc2(x)
+        if self.init_type == "alpha" and self.alpha != 0:
+            x = x / self.alpha
         return x
 
 def loss_fn(outputs, targets):
