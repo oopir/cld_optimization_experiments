@@ -5,7 +5,7 @@ experiment:
   # alphas: [0.05, 0.15, 0.5, 1.5, 5, 15, 50]
   alphas: [0.05, 0.15, 0.5]
   betas: [.inf]
-  epochs: 1000
+  epochs: 200
   eta: 1.0e-2
   eta_mode: per_alpha_beta # scalar / per_beta / per_alpha_beta (should match what it was set to in 'eta_tuning:' block)
   eta_table_path: "configs/tuning/etas_mnist_3.yaml" # fill this when you use fine-tuned values
@@ -19,17 +19,17 @@ experiment:
   track_jacobian: false
   jac_probe_size: 1
   device: cuda
-  track_every: 25
-  print_every: 250
+  track_every: 10
+  print_every: 100
   collect_feature_stats: false
 
 run:
   ckpt_dir: "~/cld_checkpoints/expr1"
   save_ckpt: false
-  # load_ckpt: false
-  # load_ckpt_name: ".pt"
-  # resume_from_ckpt: false
-  # new_total_epochs: 100000
+  load_ckpt: true
+  load_ckpt_name: "_mnist_20260213_164522.pt"
+  resume_from_ckpt: true
+  new_total_epochs: 300
   # config_overrides: ['print_every']
 
 # eta_tuning:

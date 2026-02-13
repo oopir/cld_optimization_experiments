@@ -160,7 +160,7 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
 
 def plot_test_error_vs_alpha(results, output_path="alpha_test_error.pdf"):
     """
-    results: ResultsByLabel as produced by run_exp1
+    results: ResultsByLabel as produced by run_exp
              keys are labels like 'α=1e+00 β=inf', values are {seed -> metrics}
     """
     xs = []

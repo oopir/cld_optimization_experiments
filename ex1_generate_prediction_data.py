@@ -17,15 +17,15 @@ from sklearn.datasets import load_digits
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
-from src.metric_checkpoints import Exp1Config, load_exp1_checkpoint
+from src.config import ExpConfig, load_checkpoint
 from src.model import TwoLayerNet
 from src.linearized import init_linearization, linearized_forward
 
 
-def _ex1_get_unused_digits(config: Exp1Config, num_points: int = 100, device: str = "cpu"):
+def _ex1_get_unused_digits(config: ExpConfig, num_points: int = 100, device: str = "cpu"):
     """
     construct `num_points` digits points that were not used in *any training set* of any run 
-    in the given Exp1Config. points that appear in a test set are treated as unused.
+    in the given ExpConfig. points that appear in a test set are treated as unused.
     """
     # get the full digits dataset, with the same preprocessing as in load_digits_data
     digits = load_digits()
@@ -69,7 +69,7 @@ def compute_ex1_oos_predictions(
       - flatten outputs into vectors,
       - optionally save everything to disk.
     """
-    results, config = load_exp1_checkpoint(ckpt_path)
+    results, config = load_checkpoint(ckpt_path)
     idx_oos, X_oos, y_oos = _ex1_get_unused_digits(config, num_points=num_points, device=device)
 
     all_preds = {}

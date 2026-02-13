@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace, asdict
+from dataclasses import replace, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Iterable
@@ -13,45 +13,26 @@ import multiprocessing as mp
 import numpy as np
 import torch
 
-from .metric_checkpoints import Exp1Config, save_exp1_checkpoint, load_exp1_checkpoint
+from .config import ExpConfig, RunOpts, save_checkpoint, load_checkpoint
 from .training import train_multiseed
 
 Metrics = Dict[str, Any]
 ResultsByLabel = Dict[str, Dict[int, Metrics]]
 
-EXP1_CHECKPOINT_PREFIX = "exp1_"
+EXP1_CHECKPOINT_PREFIX = ""
 
+# -------------------------------------------------------------------------- #
+# ----------------------------- config helpers ----------------------------- #
+# -------------------------------------------------------------------------- #
 
-@dataclass
-class Exp1RunOpts:
-    ckpt_dir:         Path
-    save_ckpt:        bool = False # for saving progress after training
-    load_ckpt:        bool = False # for plotting/extending an existing ckpt  
-    load_ckpt_name:   Path | None = None
-    resume_from_ckpt: bool = False
-    new_total_epochs: int | None = None
-    config_overrides: Optional[List[str]] = None
-
-
-def _format_scalar_for_key(x: float) -> str:
-    if isinstance(x, str):
-        return x
-    if math.isinf(float(x)):
-        return "inf"
-    x_float = float(x)
-    if x_float.is_integer():
-        return str(int(x_float))
-    return str(x_float)
-
-
-def build_from_config_mapping(cfg: dict) -> tuple[Exp1Config, Exp1RunOpts]:
+def build_from_config_mapping(cfg: dict) -> tuple[ExpConfig, RunOpts]:
     """
     cfg can be either:
       {
-        "experiment": { ...fields of Exp1Config... },
-        "run":        { ...fields of Exp1RunOpts... }
+        "experiment": { ...fields of ExpConfig... },
+        "run":        { ...fields of RunOpts... }
       }
-    or a flat mapping of Exp1Config fields only.
+    or a flat mapping of ExpConfig fields only.
     """
     exp_section = cfg.get("experiment")
     run_section = cfg.get("run")
@@ -62,18 +43,17 @@ def build_from_config_mapping(cfg: dict) -> tuple[Exp1Config, Exp1RunOpts]:
     else:
         exp_kwargs = exp_section
         run_kwargs = run_section or {}
-    exp_config = Exp1Config(**exp_kwargs)
+    exp_config = ExpConfig(**exp_kwargs)
 
     if "ckpt_dir" in run_kwargs:
         run_kwargs["ckpt_dir"] = Path(run_kwargs["ckpt_dir"]).expanduser()
     if "load_ckpt_name" in run_kwargs:
         run_kwargs["load_ckpt_name"] = Path(run_kwargs["load_ckpt_name"]).expanduser()
-    run_opts = Exp1RunOpts(**run_kwargs)
+    run_opts = RunOpts(**run_kwargs)
 
     return exp_config, run_opts
 
-
-def _apply_config_overrides(base: Exp1Config, override_src: Exp1Config, override_keys: Optional[Iterable[str]]) -> Exp1Config:
+def _apply_config_overrides(base: ExpConfig, override_src: ExpConfig, override_keys: Optional[Iterable[str]]) -> ExpConfig:
     if not override_keys:
         return base
     for k in override_keys:
@@ -96,6 +76,46 @@ def _apply_config_overrides(base: Exp1Config, override_src: Exp1Config, override
         return base
     return replace(base, **kwargs)
 
+def _print_exp_config(
+    exp_config: ExpConfig,
+    prev_config: ExpConfig | None = None,
+    override_keys: Iterable[str] | None = None,
+) -> None:
+    print("configuration:")
+
+    curr = asdict(exp_config)
+    prev = asdict(prev_config) if prev_config is not None else {}
+    override_keys = set(override_keys or ())
+
+    for k, v in curr.items():
+        if prev_config is not None and k in override_keys and k in prev and prev[k] != v:
+            print(f"  {k}: {v} (previously {prev[k]})")
+        else:
+            print(f"  {k}: {v}")
+
+# -------------------------------------------------------------------------- #
+# ---------------------- work with tuning's eta-table  --------------------- #
+# -------------------------------------------------------------------------- #
+
+def _format_scalar_for_key(x: float) -> str:
+    if isinstance(x, str):
+        return x
+    if math.isinf(float(x)):
+        return "inf"
+    x_float = float(x)
+    if x_float.is_integer():
+        return str(int(x_float))
+    return str(x_float)
+
+def label_from_alpha_beta(alpha=None, beta=None, n=None):
+    label = ""
+    if alpha is not None:
+        label += f"α={alpha:.0e} "
+    if n is None:
+        label += f"β={beta}"
+    else:
+        label += "β=" + ("inf" if math.isinf(beta) else f"{beta // n}n")
+    return label
 
 def _load_eta_table(path: Path) -> Dict[str, Any]:
     if path is None:
@@ -110,8 +130,7 @@ def _load_eta_table(path: Path) -> Dict[str, Any]:
             print(f"[eta] WARNING: loading eta from '{path}' failed; using defaults.")
     return data
 
-
-def _resolve_eta(config: Exp1Config, alpha: float, beta: float) -> float:
+def _resolve_eta(config: ExpConfig, alpha: float, beta: float) -> float:
     mode = getattr(config, "eta_mode", "scalar")
     table_path = getattr(config, "eta_table_path", None)
     default_eta = getattr(config, "eta_default", None)
@@ -161,38 +180,12 @@ def _resolve_eta(config: Exp1Config, alpha: float, beta: float) -> float:
     print(f"[eta_debug] unknown mode '{mode}' -> scalar eta={config.eta}")
     return config.eta
 
-
-def _print_exp_config(
-    exp_config: Exp1Config,
-    prev_config: Exp1Config | None = None,
-    override_keys: Iterable[str] | None = None,
-) -> None:
-    print("configuration:")
-
-    curr = asdict(exp_config)
-    prev = asdict(prev_config) if prev_config is not None else {}
-    override_keys = set(override_keys or ())
-
-    for k, v in curr.items():
-        if prev_config is not None and k in override_keys and k in prev and prev[k] != v:
-            print(f"  {k}: {v} (previously {prev[k]})")
-        else:
-            print(f"  {k}: {v}")
-
-
-def label_from_alpha_beta(alpha=None, beta=None, n=None):
-    label = ""
-    if alpha is not None:
-        label += f"α={alpha:.0e} "
-    if n is None:
-        label += f"β={beta}"
-    else:
-        label += "β=" + ("inf" if math.isinf(beta) else f"{beta // n}n")
-    return label
-
+# -------------------------------------------------------------------------- #
+# --------------------------- training primitive --------------------------- #
+# -------------------------------------------------------------------------- #
 
 def _train_single_alpha_beta(
-    config: Exp1Config,
+    config: ExpConfig,
     alpha: float = 1.0,
     beta: float = np.inf,
     gpu_ids: Optional[List[int]] = None,
@@ -208,40 +201,15 @@ def _train_single_alpha_beta(
     results_by_seed: Dict[int, Metrics] = train_multiseed(alpha=alpha, beta=beta, **common)
     return results_by_seed
 
-
-def _write_base_ckpt_data_for_beta_to_disk(
-    label: str,
-    base_seed_metrics: Mapping[int, Mapping[str, Any]],
-    resume_root: Path,
-) -> Dict[int, str]:
-    """
-    populate a tmp directory with the data needed to resume training from some saved state
-    (initial model parameters, last model (NN + linearized) parameters, randomness state)
-    """
-    dirr = resume_root / label.replace("α=", "alpha_").replace("β=", "beta_")
-    dirr.mkdir(parents=True, exist_ok=True)
-
-    resume_paths: Dict[int, str] = {}
-
-    for seed, metrics in base_seed_metrics.items():
-        payload = {
-            "init_model_state_dict": metrics["init_model_state_dict"],
-            "start_model_state_dict": metrics["model_state_dict"],
-            "start_lin_params": metrics.get("lin_params_state"),
-            "rng_state": metrics.get("rng_state"),
-        }
-        path = dirr / f"seed_{seed}.pt"
-        torch.save(payload, path)
-        resume_paths[seed] = str(path)
-
-    return resume_paths
-
+# -------------------------------------------------------------------------- #
+# ------------------------------- eta tuning ------------------------------- #
+# -------------------------------------------------------------------------- #
 
 def _tune_eta_for_pair(
     alpha: float,
     beta: float,
     device: Optional[int],
-    base_config: Exp1Config,
+    base_config: ExpConfig,
     eta_grid: List[float],
     tuning_epochs: int,
     seed: int,
@@ -289,8 +257,7 @@ def _tune_eta_for_pair(
 
     return alpha, beta, best_eta, best_score
 
-
-def tune_eta_for_exp1(base_config: Exp1Config, tuning_cfg: Mapping[str, Any], gpu_ids: Optional[List[int]]) -> None:
+def tune_eta_for_exp(base_config: ExpConfig, tuning_cfg: Mapping[str, Any], gpu_ids: Optional[List[int]]) -> None:
     """
     Run short training runs over an eta grid for each beta or (alpha,beta),
     pick the best eta according to the requested metric, and write a YAML table.
@@ -315,7 +282,7 @@ def tune_eta_for_exp1(base_config: Exp1Config, tuning_cfg: Mapping[str, Any], gp
         print(f"[eta_tuning] Table '{output_path}' already exists, skipping (force=False).")
         return
     if not base_config.betas:
-        raise ValueError("Exp1Config.betas is empty; nothing to tune over.")
+        raise ValueError("ExpConfig.betas is empty; nothing to tune over.")
 
     # get config values (or default alternatives)
     mode          = tuning_cfg.get("mode", "per_beta")
@@ -412,9 +379,41 @@ def tune_eta_for_exp1(base_config: Exp1Config, tuning_cfg: Mapping[str, Any], gp
 
     print(f"[eta_tuning] Saved tuned etas to '{output_path}'", flush=True)
 
+# -------------------------------------------------------------------------- #
+# ------------------ training & checkpoint orchestration ------------------- #
+# -------------------------------------------------------------------------- #
+
+# write to disk the info needed to resume training for a specific (alpha,beta) pair
+# so that each worker can load to RAM its own contents without other stuff
+def _write_base_ckpt_data_for_beta_to_disk(
+    label: str,
+    base_seed_metrics: Mapping[int, Mapping[str, Any]],
+    resume_root: Path,
+) -> Dict[int, str]:
+    """
+    populate a tmp directory with the data needed to resume training from some saved state
+    (initial model parameters, last model (NN + linearized) parameters, randomness state)
+    """
+    dirr = resume_root / label.replace("α=", "alpha_").replace("β=", "beta_")
+    dirr.mkdir(parents=True, exist_ok=True)
+
+    resume_paths: Dict[int, str] = {}
+
+    for seed, metrics in base_seed_metrics.items():
+        payload = {
+            "init_model_state_dict": metrics["init_model_state_dict"],
+            "start_model_state_dict": metrics["model_state_dict"],
+            "start_lin_params": metrics.get("lin_params_state"),
+            "rng_state": metrics.get("rng_state"),
+        }
+        path = dirr / f"seed_{seed}.pt"
+        torch.save(payload, path)
+        resume_paths[seed] = str(path)
+
+    return resume_paths
 
 def _train_over_range(
-    config: Exp1Config,
+    config: ExpConfig,
     alpha_range: list = [],
     beta_range: list = [],
     gpu_ids: Optional[List[int]] = None,
@@ -458,7 +457,6 @@ def _train_over_range(
     
     return results
 
-
 def _merge_metrics(base: Mapping[str, Any], extra: Mapping[str, Any]) -> Dict[str, Any]:
     base_keys = set(base.keys())
     extra_keys = set(extra.keys())
@@ -495,14 +493,13 @@ def _merge_metrics(base: Mapping[str, Any], extra: Mapping[str, Any]) -> Dict[st
 
     return merged
 
-
 def resume_from_ckpt(
     base_results: ResultsByLabel,
-    config: Exp1Config,
+    config: ExpConfig,
     new_epochs: int,
     gpu_ids: List[int],
     tmp_dir: Path,
-) -> Tuple[ResultsByLabel, Exp1Config]:
+) -> Tuple[ResultsByLabel, ExpConfig]:
     # some validation
     if new_epochs <= config.epochs:
         raise ValueError(f"new_epochs ({new_epochs}) must be > existing epochs ({config.epochs})")
@@ -541,14 +538,17 @@ def resume_from_ckpt(
     new_config = replace(config, epochs=new_epochs)
     return merged_results, new_config
 
+# -------------------------------------------------------------------------- #
+# ------------------------------ "public API" ------------------------------ #
+# -------------------------------------------------------------------------- #
 
-def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> Tuple[ResultsByLabel, Exp1Config]:
+def run_exp(config: ExpConfig, run_opts: RunOpts, gpu_ids: List[int],) -> Tuple[ResultsByLabel, ExpConfig]:
     run_opts.ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     if run_opts.load_ckpt:
         # load ckpt
         load_ckpt_path = run_opts.ckpt_dir / run_opts.load_ckpt_name
-        base_results, base_config = load_exp1_checkpoint(str(load_ckpt_path))
+        base_results, base_config = load_checkpoint(str(load_ckpt_path))
         print(f"Loaded checkpoint: {load_ckpt_path}")
         
         # resume run if needed
@@ -581,14 +581,13 @@ def run_exp1(config: Exp1Config, run_opts: Exp1RunOpts, gpu_ids: List[int],) -> 
     if run_opts.save_ckpt:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         ckpt_path = run_opts.ckpt_dir / f"{EXP1_CHECKPOINT_PREFIX}_{exp_config.dataset}_{timestamp}.pt"
-        save_exp1_checkpoint(str(ckpt_path), results, exp_config)
+        save_checkpoint(str(ckpt_path), results, exp_config)
         print(f"Saved checkpoint: {ckpt_path}")
 
     return results, exp_config
 
-
 # required for plotting the ICML-deadline ckpt
-def infer_effective_track_every(results: ResultsByLabel, config: Exp1Config) -> int:
+def infer_effective_track_every(results: ResultsByLabel, config: ExpConfig) -> int:
     beta_key = next(iter(results))
     seed_key = next(iter(results[beta_key]))
     hist = results[beta_key][seed_key]["train_loss_hist"]

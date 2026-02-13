@@ -1,9 +1,10 @@
+from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List
 import torch
 
 @dataclass
-class Exp1Config:
+class ExpConfig:
     # parallelization
     seeds: list = field(default_factory=lambda: [0])
     device: str = "cpu"
@@ -58,11 +59,23 @@ class Exp1Config:
         )
 
 
-def save_exp1_checkpoint(path, results, config: Exp1Config):
+@dataclass
+class RunOpts:
+    ckpt_dir:         Path
+    save_ckpt:        bool = False # for saving progress after training
+    load_ckpt:        bool = False # for plotting/extending an existing ckpt  
+    load_ckpt_name:   Optional[Path] = None
+    resume_from_ckpt: bool = False
+    new_total_epochs: Optional[int] = None
+    config_overrides: Optional[List[str]] = None
+
+
+def save_checkpoint(path, results, config: ExpConfig):
     payload = {"type": "exp1", "config": config, "results": results}
     torch.save(payload, path)
 
-def load_exp1_checkpoint(path):
+
+def load_checkpoint(path):
     payload = torch.load(path, map_location="cpu", weights_only=False)
 
     payload_type = payload.get("type", "exp1") # 2nd argument "tolerates" old ckpts w/o "type" field

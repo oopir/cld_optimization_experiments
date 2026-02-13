@@ -3,7 +3,7 @@ import os
 import numpy as np
 import torch
 
-from src.metric_checkpoints import load_exp1_checkpoint, save_exp1_checkpoint
+from src.config import load_checkpoint, save_checkpoint
 
 
 def build_epoch_hist(segments):
@@ -26,7 +26,7 @@ def build_epoch_hist(segments):
 
 
 def retrofit_checkpoint(in_path, out_path, segments):
-    results, config = load_exp1_checkpoint(in_path)
+    results, config = load_checkpoint(in_path)
     print(f"Loaded: {in_path}")
     print(f"config.epochs={config.epochs}, track_every={config.track_every}")
 
@@ -51,7 +51,7 @@ def retrofit_checkpoint(in_path, out_path, segments):
     # Optionally also update config.track_every to something consistent:
     # here we just keep the old value; plotting will prefer epoch_hist anyway.
 
-    save_exp1_checkpoint(out_path, results, config)
+    save_checkpoint(out_path, results, config)
     print(f"Saved fixed checkpoint to: {out_path}")
 
 

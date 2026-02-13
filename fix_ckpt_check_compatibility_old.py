@@ -1,10 +1,10 @@
 # test_constant_track_every.py
 import numpy as np
-from src.metric_checkpoints import load_exp1_checkpoint
+from src.config import load_checkpoint
 import os 
 
 def test_constant_track_every(path):
-    results, config = load_exp1_checkpoint(path)
+    results, config = load_checkpoint(path)
     E = config.epochs
     T_conf = config.track_every
 

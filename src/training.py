@@ -24,6 +24,10 @@ from .stats import (
     estimate_loss_floor
 )
 
+# -------------------------------------------------------------------------- #
+# ---------------- save/load random state for checkpointing ---------------- #
+# -------------------------------------------------------------------------- #
+
 def _save_rng_state(device: str):
     state = {
         "python": random.getstate(),
@@ -52,6 +56,10 @@ def _load_rng_state(device: str, state):
         else:
             idx = torch.cuda.current_device()
         torch.cuda.set_rng_state(cuda_state, device=idx)
+
+# -------------------------------------------------------------------------- #
+# --------------- init variables for training & stat tracking -------------- #
+# -------------------------------------------------------------------------- #
 
 def _init_base_model_vars(d_in, d_out, m, init_type, alpha, device, lam_fc1, lam_fc2, init_model_state_dict=None):
 
@@ -102,6 +110,10 @@ def _init_metrics(track_jacobian):
     metrics["nn_to_lin_hist"] = []
     metrics["nn_lin_param_dist_hist"] = []
     return metrics
+
+# -------------------------------------------------------------------------- #
+# -------------------- train (& handle parallelization) -------------------- #
+# -------------------------------------------------------------------------- #
 
 def _forward_backward(model, data, batch_size=1024):
     X_train = data["X_train"]
