@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------
+# you shouldn't attempt to resume. Saving currently doesn't work 
+# because extension has rng_state and ckpt does not. extending it
+# without the actual rng_state it finished with isn't possible
+# ---------------------------------------------------------------
+
+# for convenience, this section has the actual config used in obtaining exp1_digits_20260127_135649
+# don't forget that these values affect nothing if run.config_override is an empty list
+experiment:
+  seeds: [0, 1, 2, 3, 4]
+  n: 10
+  random_labels: false
+  betas: [100, 500, 1000]
+  epochs: 0
+  eta: 1.0e-5
+  m: 159056
+  dataset: digits
+  init_type: standard
+  lam_fc1: null
+  lam_fc2: null
+  regularization_scale: 1.0
+  same_noise: false
+  use_linearized: true
+  track_jacobian: true
+  jac_probe_size: 10
+  device: cuda
+  track_every: 30000
+  print_every: 600000
+
+run:
+  ckpt_dir: "~/cld_checkpoints/expr1"
+  save_ckpt: true
+  load_ckpt: true
+  load_ckpt_name: "exp1_digits_20260127_135649.pt"
+  resume_from_ckpt: true
+  new_total_epochs: 4000002

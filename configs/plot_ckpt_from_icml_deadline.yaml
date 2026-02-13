@@ -1,0 +1,9 @@
+experiment: {}
+
+run:
+  ckpt_dir: "~/cld_checkpoints/expr1"
+  save_ckpt: false
+  load_ckpt: true
+  load_ckpt_name: "exp1_digits_20260127_135649.pt"
+  resume_from_ckpt: false
+  new_total_epochs: 0

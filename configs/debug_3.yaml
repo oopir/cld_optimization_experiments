@@ -1,0 +1,42 @@
+experiment:
+  seeds: [0]
+  n: 60000
+  random_labels: false
+  # alphas: [0.05, 0.15, 0.5, 1.5, 5, 15, 50]
+  alphas: [50]
+  betas: [.inf]
+  epochs: 50000
+  eta: 0
+  eta_mode: per_alpha_beta # scalar / per_beta / per_alpha_beta (should match what it was set to in 'eta_tuning:' block)
+  eta_table_path: "configs/tuning/etas_mnist_3.yaml" # fill this when you use fine-tuned values
+  eta_default: null
+  m: 10000
+  dataset: mnist
+  init_type: alpha
+  regularization_scale: 1
+  use_linearized: false
+  same_noise: false
+  track_jacobian: false
+  jac_probe_size: 1
+  device: cuda
+  track_every: 250
+  print_every: 250
+
+run:
+  ckpt_dir: "~/cld_checkpoints/expr1"
+  save_ckpt: false
+  load_ckpt: false
+  load_ckpt_name: ".pt"
+  resume_from_ckpt: false
+  new_total_epochs: 0
+
+# eta_tuning:
+#   enabled: true # set to false when not tuning
+#   mode: per_alpha_beta
+#   eta_grid: [1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1, 1.0e+0, 1.0e+1]
+#   tuning_epochs: 500
+#   tuning_seeds: [0] # currently only one seed supported because of parallelization over (alpha,beta), need to modify this
+#   metric: train_loss
+#   goal: min
+#   output_path: "configs/tuning/etas_mnist_3.yaml"
+#   force: true
