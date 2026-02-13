@@ -1,0 +1,8 @@
+per_alpha_beta:
+  alpha=0.05,beta=inf: 0.01
+  alpha=0.15,beta=inf: 0.01
+  alpha=0.5,beta=inf: 0.01
+  alpha=1.5,beta=inf: 0.01
+  alpha=15,beta=inf: 0.001
+  alpha=5,beta=inf: 0.001
+  alpha=50,beta=inf: 0.001

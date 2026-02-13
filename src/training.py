@@ -5,7 +5,7 @@ import random
 import numpy as np
 import torch
 
-from .data import load_digits_data
+from .data import load_digits_data, load_mnist_data
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
 from .langevin import langevin_step, joint_langevin_step
 from .linearized import (
@@ -53,9 +53,9 @@ def _load_rng_state(device: str, state):
             idx = torch.cuda.current_device()
         torch.cuda.set_rng_state(cuda_state, device=idx)
 
-def _init_base_model_vars(d_in, d_out, m, init_type, device, lam_fc1, lam_fc2, init_model_state_dict=None):
+def _init_base_model_vars(d_in, d_out, m, init_type, alpha, device, lam_fc1, lam_fc2, init_model_state_dict=None):
 
-    model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, init_type=init_type).to(device)
+    model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, init_type=init_type, alpha=alpha).to(device)
     if init_model_state_dict is not None:
         model.load_state_dict(init_model_state_dict)
     params, lam_tensors = make_lambda_like_params(model, init_type, lam_fc1=lam_fc1, lam_fc2=lam_fc2)
@@ -81,10 +81,10 @@ def _init_linearization_vars(model, params0, lam_tensors):
 
     return (base_params_dict, lin_params, lin_lam_tensors, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0)
 
-def _init_jacobian_track_vars(d, d_out, m, init_type, device, model, X_train, probe_bs):
+def _init_jacobian_track_vars(d, d_out, m, init_type, alpha, device, model, X_train, probe_bs):
     # model_at_init is made in case we will want to track Jacobian
     # drift w.r.t. full Jacobian and not just a partial probe
-    model_at_init = TwoLayerNet(d_in=d, m=m, d_out=d_out, init_type=init_type).to(device)
+    model_at_init = TwoLayerNet(d_in=d, m=m, d_out=d_out, init_type=init_type, alpha=alpha).to(device)
     model_at_init.load_state_dict(model.state_dict())
 
     X_probe = X_train[:probe_bs].to(device)
@@ -103,6 +103,19 @@ def _init_metrics(track_jacobian):
     metrics["nn_lin_param_dist_hist"] = []
     return metrics
 
+def _forward_backward(model, data, batch_size=1024):
+    X_train = data["X_train"]
+    N = X_train.size(0)
+    for start in range(0, N, batch_size):
+        end = start + batch_size
+
+        xb = X_train[start:end]
+        yb = data["y_train_one_hot"][start:end] if "y_train_one_hot" in data else data["y_train"][start:end]
+
+        outputs = model(xb)
+        loss = loss_fn(outputs, yb) * (len(xb) / N)
+        loss.backward()
+
 def train(
     data,
     eta,
@@ -110,6 +123,7 @@ def train(
     beta,
     m,
     init_type="standard",
+    alpha=1.0,
     lam_fc1=None,
     lam_fc2=None,
     regularization_scale=1.0,
@@ -125,13 +139,14 @@ def train(
     start_lin_params=None,
     resume_rng_state=None,
     epoch_offset=0,
+    collect_feature_stats=True,
 ):
 
     # --------- init environment & compute values at init for stats -------- #
     X_train = data["X_train"]
 
     model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0 = \
-        _init_base_model_vars(data["d_in"], data["d_out"], m, init_type, device, lam_fc1, lam_fc2, init_model_state_dict)
+        _init_base_model_vars(data["d_in"], data["d_out"], m, init_type, alpha, device, lam_fc1, lam_fc2, init_model_state_dict)
 
     if init_model_state_dict is not None:
         init_state_for_metrics = {k: v.detach().cpu() for k, v in init_model_state_dict.items()}
@@ -151,7 +166,7 @@ def train(
         # model_at_init, X_probe, jac_init, jac_init_norm_sq = \
         #     _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, device, model, X_train, jac_probe_size)
         model_at_init, _, _, _ = \
-            _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, device, model, X_train, jac_probe_size)
+            _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, alpha, device, model, X_train, jac_probe_size)
 
 
     with torch.no_grad():
@@ -171,16 +186,16 @@ def train(
     if resume_rng_state is not None:
         _load_rng_state(device, resume_rng_state)
 
-    print(f"training starts for beta={beta} from epoch={epoch_offset+1} on device {device}...", flush=True)
-    stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
+    print(f"training starts for alpha={alpha}, beta={beta}, eta={eta} from epoch={epoch_offset+1} on device {device}...", flush=True)
+    stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats)
     sup_sigma_max_v = stats["sigma_max_v"]
     # print(f"epoch {0:8d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
     for epoch in range(epoch_offset + 1, epochs + 1):
         # -------------------- compute metrics and stats -------------------- #
         model.eval()
-        if epoch % track_every == 1:
-            stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
+        if track_every == 1 or epoch % track_every == 1:
+            stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats)
             for name in BASE_METRIC_NAMES:
                 metrics[f"{name}_hist"].append(stats[name])
             sup_sigma_max_v = max(sup_sigma_max_v, stats["sigma_max_v"])
@@ -202,7 +217,7 @@ def train(
                 nn_lin_param_dist = get_nn_lin_param_dist(params, lin_params)
                 metrics["nn_lin_param_dist_hist"].append(nn_lin_param_dist)
 
-            if epoch % print_every == 1:
+            if print_every == 1 or epoch % print_every == 1:
                 print(
                     f"device {device} | "
                     f"epoch {epoch:8d} | "
@@ -218,12 +233,7 @@ def train(
         for p in params:
             if p.grad is not None:
                 p.grad.zero_()
-        outputs = model(X_train)
-        if "y_train_one_hot" in data:
-            train_loss = loss_fn(outputs, data["y_train_one_hot"])
-        else:
-            train_loss = loss_fn(outputs, data["y_train"])
-        train_loss.backward()
+        _forward_backward(model, data, batch_size=1024)
         # lin forward + backward
         if use_linearized:
             for p in lin_params:
@@ -248,9 +258,13 @@ def train(
     metrics["rng_state"] = _save_rng_state(device)
 
     # -------------------- compute remaining stats --------------------- #
-    metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v)
-    metrics["loss_floor"] = estimate_loss_floor(X_train, beta, m=m, device=device)
-
+    if collect_feature_stats:
+        metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v)
+        metrics["loss_floor"] = estimate_loss_floor(X_train, beta, m=m, device=device)
+    else:
+        metrics["param_dist_upper_bound"] = float("nan")
+        metrics["loss_floor"] = float("nan")
+        
     metrics["model_state_dict"] = {k: v.detach().cpu() for k, v in model.state_dict().items()}
     metrics["init_model_state_dict"] = init_state_for_metrics
     if use_linearized:
@@ -269,6 +283,7 @@ def _train_multiseed_worker(
     beta,
     m,
     init_type,
+    alpha,
     lam_fc1,
     lam_fc2,
     regularization_scale,
@@ -280,6 +295,7 @@ def _train_multiseed_worker(
     print_every,
     resume_paths=None,
     epoch_offset=0,
+    collect_feature_stats=True, 
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -292,6 +308,8 @@ def _train_multiseed_worker(
 
     if dataset == "digits":
         data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
+    elif dataset == "mnist":
+        data = load_mnist_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
 
@@ -315,6 +333,7 @@ def _train_multiseed_worker(
         beta=beta,
         m=m,
         init_type=init_type,
+        alpha=alpha,
         lam_fc1=lam_fc1,
         lam_fc2=lam_fc2,
         regularization_scale=regularization_scale,
@@ -330,10 +349,12 @@ def _train_multiseed_worker(
         start_lin_params=start_lin_params,
         resume_rng_state=rng_state,
         epoch_offset=epoch_offset,
+        collect_feature_stats=collect_feature_stats, 
     )
 
     return run_seed, metrics
 
+# note to self - do not forget that the argument order matters because of how we call this function
 def train_multiseed(
     dataset,
     seeds,
@@ -344,6 +365,7 @@ def train_multiseed(
     beta,
     m,
     init_type="standard",
+    alpha=1.0,
     lam_fc1=None,
     lam_fc2=None,
     regularization_scale=1.0,
@@ -357,6 +379,7 @@ def train_multiseed(
     epoch_offset=0,
     gpu_ids=None,
     resume_paths=None,
+    collect_feature_stats=True, 
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -373,6 +396,7 @@ def train_multiseed(
         beta,
         m,
         init_type,
+        alpha,
         lam_fc1,
         lam_fc2,
         regularization_scale,
@@ -384,6 +408,7 @@ def train_multiseed(
         print_every,
         resume_paths,
         epoch_offset,
+        collect_feature_stats,
     )
 
     # create a list of gpu ids & set gpus to spawn

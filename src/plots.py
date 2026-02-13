@@ -35,8 +35,8 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         any("jacobian_dist_hist" in r for r in run_results_by_seed.values())
         for run_results_by_seed in results.values()
     )
-    if not has_jacobian_any:
-        raise RuntimeError("plot_ex1_multiseed expects Jacobian data")
+    # if not has_jacobian_any:
+    #     raise RuntimeError("plot_ex1_multiseed expects Jacobian data")
 
     # ------------------------- figure config ------------------------- #
     fig  = plt.figure(figsize=(8, 13.0))
@@ -88,15 +88,16 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         c = next(colors)
 
         # jacobian distances
-        jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]
-        jac_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
-        l2_mean = jac_arr[:, :, 0].mean(axis=0)
-        l2_std  = jac_arr[:, :, 0].std(axis=0)
-        l2_mean[0] = max(l2_mean[0], 1e-12)
-        _plot_band(axes["jacobian_dist_l2"], x, l2_mean, l2_std, label=run_name, color=c)
-        co_mean = jac_arr[:, :, 1].mean(axis=0)
-        co_std  = jac_arr[:, :, 1].std(axis=0)
-        _plot_band(axes["jacobian_dist_co"], x, co_mean, co_std, label=run_name, color=c)
+        if has_jacobian_any:
+            jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]
+            jac_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
+            l2_mean = jac_arr[:, :, 0].mean(axis=0)
+            l2_std  = jac_arr[:, :, 0].std(axis=0)
+            l2_mean[0] = max(l2_mean[0], 1e-12)
+            _plot_band(axes["jacobian_dist_l2"], x, l2_mean, l2_std, label=run_name, color=c)
+            co_mean = jac_arr[:, :, 1].mean(axis=0)
+            co_std  = jac_arr[:, :, 1].std(axis=0)
+            _plot_band(axes["jacobian_dist_co"], x, co_mean, co_std, label=run_name, color=c)
 
         # param distances
         if use_linearized:
@@ -156,3 +157,52 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
     for a in axes.values():
         a.set_visible(True)
     fig.savefig("expr1_full.pdf", bbox_inches="tight")
+
+def plot_test_error_vs_alpha(results, output_path="alpha_test_error.pdf"):
+    """
+    results: ResultsByLabel as produced by run_exp1
+             keys are labels like 'α=1e+00 β=inf', values are {seed -> metrics}
+    """
+    xs = []
+    ys = []
+
+    for label, run_results_by_seed in results.items():
+        if "α" not in label:
+            continue
+
+        # parse alpha from 'α=1e+00 β=...' -> take first token, then split on '='
+        first_tok = label.split()[0]        # 'α=1e+00'
+        alpha_str = first_tok.split("=", 1)[1]
+        alpha = float(alpha_str)
+
+        # mean final test error across seeds (1 - test_acc)
+        last_accs = []
+        for metrics in run_results_by_seed.values():
+            hist = metrics.get("test_acc_hist", None)
+            if hist:
+                last_accs.append(hist[-1])
+        if not last_accs:
+            continue
+
+        mean_acc = float(np.mean(last_accs))
+        err_pct = 100.0 * (1.0 - mean_acc)
+
+        xs.append(alpha)
+        ys.append(err_pct)
+
+    if not xs:
+        raise RuntimeError("No alpha-labelled runs found in results.")
+
+    xs = np.asarray(xs)
+    ys = np.asarray(ys)
+    order = np.argsort(xs)
+    xs = xs[order]
+    ys = ys[order]
+
+    fig, ax = plt.subplots(figsize=(3.0, 2.0))
+    ax.plot(xs, ys, linestyle="--")
+    ax.set_xscale("log")
+    ax.set_xlabel(r"$\alpha$")
+    ax.set_ylabel("Test Error (%)")
+    fig.tight_layout()
+    fig.savefig(output_path, bbox_inches="tight")

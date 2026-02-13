@@ -1,0 +1,24 @@
+experiment:
+    seeds: [0, 1, 2, 3, 4]
+    n: 10
+    random_labels: false
+    betas: [100, 500, 1000, .inf]
+    epochs: 2000000
+    eta: 1.0e-5
+    m: 159056
+    same_noise: false
+    use_linearized: true
+    track_jacobian: true
+    jac_probe_size: 10
+    device: cuda
+    track_every: 10000
+    print_every: 250000
+  
+run:
+    ckpt_dir: "~/cld_checkpoints/expr1"
+    save_ckpt: false
+    load_ckpt: true
+    load_ckpt_name: "exp1_digits_20260211_191705.pt"
+    resume_from_ckpt: false
+    new_total_epochs: 4000000
+    config_overrides: ["print_every"]

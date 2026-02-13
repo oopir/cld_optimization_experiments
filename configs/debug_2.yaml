@@ -1,9 +1,9 @@
 experiment:
-  seeds: [0,1,2,3,4]
+  seeds: [0,1]
   n: 60000
   random_labels: false
-  alphas: [0.05, 0.15, 0.5, 1.5, 5, 15, 50]
-  # alphas: [50]
+  # alphas: [0.05, 0.15, 0.5, 1.5, 5, 15, 50]
+  alphas: [0.05, 0.15, 0.5]
   betas: [.inf]
   epochs: 1000
   eta: 1.0e-2
@@ -19,18 +19,18 @@ experiment:
   track_jacobian: false
   jac_probe_size: 1
   device: cuda
-  track_every: 250
-  print_every: 10000
+  track_every: 25
+  print_every: 250
   collect_feature_stats: false
 
 run:
   ckpt_dir: "~/cld_checkpoints/expr1"
-  save_ckpt: true
-  load_ckpt: true
-  load_ckpt_name: "exp1__mnist_20260213_134829.pt"
-  resume_from_ckpt: true
-  new_total_epochs: 100000
-  config_overrides: ['print_every']
+  save_ckpt: false
+  # load_ckpt: false
+  # load_ckpt_name: ".pt"
+  # resume_from_ckpt: false
+  # new_total_epochs: 100000
+  # config_overrides: ['print_every']
 
 # eta_tuning:
 #   enabled: true # set to false when not tuning

@@ -17,7 +17,11 @@ class Exp1Config:
     # training
     epochs: int = 1
     eta: float  = 1.0
-    betas: list = field(default_factory=lambda: [1.0])
+    eta_mode: str = "scalar"               # "scalar", "per_beta", "per_alpha_beta"
+    eta_table_path: Optional[str] = None   # path to YAML table
+    eta_default: Optional[float] = None    # fallback if key missing (defaults to eta if None)
+    betas: list = field(default_factory=lambda: [])
+    alphas: list = field(default_factory=lambda: [])
     regularization_scale: float = 1.0
     lam_fc1: Optional[float] = None
     lam_fc2: Optional[float] = None
@@ -28,6 +32,7 @@ class Exp1Config:
     jac_probe_size: int = 10
     track_every: int = 10
     print_every: int = 100
+    collect_feature_stats: bool = True
 
     def train_kwargs(self):
         return dict(
@@ -48,7 +53,8 @@ class Exp1Config:
             track_jacobian=self.track_jacobian,
             jac_probe_size=self.jac_probe_size,
             track_every=self.track_every,
-            print_every=self.print_every
+            print_every=self.print_every,
+            collect_feature_stats=self.collect_feature_stats, 
         )
 
 
