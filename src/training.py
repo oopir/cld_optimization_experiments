@@ -139,6 +139,7 @@ def train(
     start_lin_params=None,
     resume_rng_state=None,
     epoch_offset=0,
+    collect_feature_stats=True,
 ):
 
     # --------- init environment & compute values at init for stats -------- #
@@ -186,7 +187,7 @@ def train(
         _load_rng_state(device, resume_rng_state)
 
     print(f"training starts for alpha={alpha}, beta={beta}, eta={eta} from epoch={epoch_offset+1} on device {device}...", flush=True)
-    stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
+    stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats)
     sup_sigma_max_v = stats["sigma_max_v"]
     # print(f"epoch {0:8d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
@@ -194,7 +195,7 @@ def train(
         # -------------------- compute metrics and stats -------------------- #
         model.eval()
         if track_every == 1 or epoch % track_every == 1:
-            stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data)
+            stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats)
             for name in BASE_METRIC_NAMES:
                 metrics[f"{name}_hist"].append(stats[name])
             sup_sigma_max_v = max(sup_sigma_max_v, stats["sigma_max_v"])
@@ -257,9 +258,13 @@ def train(
     metrics["rng_state"] = _save_rng_state(device)
 
     # -------------------- compute remaining stats --------------------- #
-    metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v)
-    metrics["loss_floor"] = estimate_loss_floor(X_train, beta, m=m, device=device)
-
+    if collect_feature_stats:
+        metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v)
+        metrics["loss_floor"] = estimate_loss_floor(X_train, beta, m=m, device=device)
+    else:
+        metrics["param_dist_upper_bound"] = float("nan")
+        metrics["loss_floor"] = float("nan")
+        
     metrics["model_state_dict"] = {k: v.detach().cpu() for k, v in model.state_dict().items()}
     metrics["init_model_state_dict"] = init_state_for_metrics
     if use_linearized:
@@ -290,6 +295,7 @@ def _train_multiseed_worker(
     print_every,
     resume_paths=None,
     epoch_offset=0,
+    collect_feature_stats=True, 
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -343,6 +349,7 @@ def _train_multiseed_worker(
         start_lin_params=start_lin_params,
         resume_rng_state=rng_state,
         epoch_offset=epoch_offset,
+        collect_feature_stats=collect_feature_stats, 
     )
 
     return run_seed, metrics
@@ -372,6 +379,7 @@ def train_multiseed(
     epoch_offset=0,
     gpu_ids=None,
     resume_paths=None,
+    collect_feature_stats=True, 
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -400,6 +408,7 @@ def train_multiseed(
         print_every,
         resume_paths,
         epoch_offset,
+        collect_feature_stats,
     )
 
     # create a list of gpu ids & set gpus to spawn

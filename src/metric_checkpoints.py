@@ -32,6 +32,7 @@ class Exp1Config:
     jac_probe_size: int = 10
     track_every: int = 10
     print_every: int = 100
+    collect_feature_stats: bool = True
 
     def train_kwargs(self):
         return dict(
@@ -52,7 +53,8 @@ class Exp1Config:
             track_jacobian=self.track_jacobian,
             jac_probe_size=self.jac_probe_size,
             track_every=self.track_every,
-            print_every=self.print_every
+            print_every=self.print_every,
+            collect_feature_stats=self.collect_feature_stats, 
         )
 
 

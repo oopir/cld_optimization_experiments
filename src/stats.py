@@ -28,7 +28,7 @@ LIN_METRIC_NAMES = [
 ]
 
 @torch.no_grad()
-def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data):
+def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats):
     X_train = data["X_train"]
     X_test  = data["X_test"]
     y_train = data["y_train"]
@@ -69,28 +69,30 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
     fc1_norm = torch.sqrt(params[0].pow(2).sum()).item()
     fc2_norm = torch.sqrt(params[1].pow(2).sum()).item()
 
-    # sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
-    sigma_max_v = 1
+    if collect_feature_stats:
+        sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
+    else:
+        sigma_max_v = float("nan")
 
-    # A_t = torch.tanh(model.fc1(X_train))
-    # dist = (A_t - A0).norm().item()
-    # feat_rel_dist = dist / (A0_norm + 1e-12)
+    if collect_feature_stats:
+        A_t = torch.tanh(model.fc1(X_train))
+        dist = (A_t - A0).norm().item()
+        feat_rel_dist = dist / (A0_norm + 1e-12)
 
-    # v_t = A_t.view(-1)
-    # v0 = A0.view(-1)
-    # cos_sim = F.cosine_similarity(v_t, v0, dim=0).item()
-    # feat_cos_dist = 1.0 - cos_sim
+        v_t = A_t.view(-1)
+        v0 = A0.view(-1)
+        cos_sim = F.cosine_similarity(v_t, v0, dim=0).item()
+        feat_cos_dist = 1.0 - cos_sim
 
-    # A_Gram = A_t @ A_t.T
-    # A_Gram = 0.5 * (A_Gram + A_Gram.T)  # numerical symmetrization
-    # try:
-    #     feat_gram_lambda = torch.linalg.eigvalsh(A_Gram)[0].item()
-    # except Exception:
-    #     print("Numerical instability occured when computing lambda_min of feature matrix. Defaulting to feat_gram_lambda=1.")
-    #     feat_gram_lambda = 1
-    feat_rel_dist = 1
-    feat_cos_dist = 1
-    feat_gram_lambda = 1
+        A_Gram = A_t @ A_t.T
+        A_Gram = 0.5 * (A_Gram + A_Gram.T)  # numerical symmetrization
+        try:
+            feat_gram_lambda = torch.linalg.eigvalsh(A_Gram)[0].item()
+        except Exception:
+            print("Numerical instability occured when computing lambda_min of feature matrix. Defaulting to feat_gram_lambda=1.")
+            feat_gram_lambda = float("nan")
+    else:
+        feat_rel_dist, feat_cos_dist, feat_gram_lambda = float("nan"), float("nan"), float("nan")
 
     return {
         "train_loss": train_loss,
@@ -252,7 +254,7 @@ def estimate_lambda_min(X, M=10000, batch_g=64, device=None):
     try:
         lam_min = torch.linalg.eigvalsh(A)[0].item()
     except Exception:
-        lam_min = 1
+        lam_min = float("nan")
     return lam_min
 
 def estimate_loss_floor(X_train, noisy_beta, m, device):
