@@ -1,44 +1,44 @@
 experiment:
-  seeds: [0,1,2,3,4]
-  n: 60000
+  seeds: [0,1,2,3,4,5,6,7]
+  n: 30000
   random_labels: false
+  reserve_last: 1000
   alphas: [0.05, 0.15, 0.5, 1.5, 5, 15, 50]
-  # alphas: [50]
   betas: [.inf]
-  epochs: 1000
+  epochs: 50000
   eta: 1.0e-2
   eta_mode: per_alpha_beta # scalar / per_beta / per_alpha_beta (should match what it was set to in 'eta_tuning:' block)
-  eta_table_path: "configs/tuning/etas_mnist_3.yaml" # fill this when you use fine-tuned values
+  eta_table_path: "configs/tuning/etas_mnist.yaml" # fill this when you use fine-tuned values
   eta_default: 1.0e-2
   m: 10000
   dataset: mnist
   init_type: alpha
   regularization_scale: 1
-  use_linearized: false
+  use_linearized: true
   same_noise: false
   track_jacobian: false
   jac_probe_size: 1
   device: cuda
-  track_every: 250
+  track_every: 100
   print_every: 10000
   collect_feature_stats: false
 
 run:
   ckpt_dir: "~/cld_checkpoints/expr1"
   save_ckpt: true
-  load_ckpt: true
-  load_ckpt_name: "exp1__mnist_20260213_134829.pt"
-  resume_from_ckpt: true
-  new_total_epochs: 100000
-  config_overrides: ['print_every']
+  # load_ckpt: true
+  # load_ckpt_name: "_mnist_20260215_141159.pt"
+  # resume_from_ckpt: true
+  # new_total_epochs: 60000
+  # config_overrides: ['print_every']
 
-# eta_tuning:
-#   enabled: true # set to false when not tuning
-#   mode: per_alpha_beta
-#   eta_grid: [1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1, 1.0e+0, 1.0e+1]
-#   tuning_epochs: 500
-#   tuning_seeds: [0] # currently only one seed supported because of parallelization over (alpha,beta), need to modify this
-#   metric: train_loss
-#   goal: min
-#   output_path: "configs/tuning/etas_mnist.yaml"
-#   force: true
+eta_tuning:
+  enabled: false # set to false when not tuning
+  # mode: per_alpha_beta
+  # eta_grid: [1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1, 1.0e+0, 1.0e+1]
+  # tuning_epochs: 500
+  # tuning_seeds: [0] # currently only one seed supported because of parallelization over (alpha,beta), need to modify this
+  # metric: train_loss
+  # goal: min
+  # output_path: "configs/tuning/etas_mnist.yaml"
+  # force: true
