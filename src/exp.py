@@ -67,10 +67,8 @@ def _apply_config_overrides(base: ExpConfig, override_src: ExpConfig, override_k
         ]:
             raise ValueError(f"Error: overriding {k} is not supported yet.")
     
-    base_dict = base.__dict__
     src_dict = override_src.__dict__
-    valid_keys = set(base_dict.keys())
-    kwargs = {k: src_dict[k] for k in override_keys if (k in valid_keys and k in src_dict and k != "epochs")}
+    kwargs = {k: src_dict[k] for k in override_keys if (k in src_dict and k != "epochs")}
 
     if not kwargs:
         return base
