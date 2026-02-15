@@ -43,31 +43,39 @@ def load_digits_data(n, random_labels=False, device="cpu", seed=42):
     }
 
 
-def load_mnist_data(n, random_labels=False, device="cpu", seed=42):
+def load_mnist_data(n, random_labels=False, device="cpu", seed=42, reserve_last=1000):
+    # download data from web
     mnist = fetch_openml("mnist_784", version=1, as_frame=False)
-    X = mnist["data"].astype(np.float32) / 255.0
+    X = mnist["data"].astype(np.float32)
+    y = mnist["target"].astype(np.int64)
+    
+    # "reserve" some datapoints for the prediction-vector experiment (by never choosing them)
+    if reserve_last > 0:
+        X = X[0 : X.shape[0] - reserve_last]
+        y = y[0 : y.shape[0] - reserve_last]
+    
+    # preprocessing
+    X = X / 255.0
     X = X - np.mean(X, axis=1, keepdims=True)
     X = X / np.linalg.norm(X, axis=1, keepdims=True) * np.sqrt(X.shape[1])
     X = X.astype(np.float32)
-    y = mnist["target"].astype(np.int64)
 
-    if n*(6/5) < 60000:
+    # train-validation split
+    if n*(6/5) < 60000 - reserve_last:
         X_train, X_tmp, y_train, y_tmp = train_test_split(X, y, train_size=n, stratify=y, random_state=seed)
         _, X_test, _, y_test = train_test_split(X_tmp, y_tmp, test_size=max(100, n//5), stratify=y_tmp, random_state=seed)
     else:
         X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.8, stratify=y, random_state=seed)
       
+    # randomize train labels (if requrested)
     if random_labels:
         y_train = np.random.randint(0, 10, size=y_train.shape[0])
 
-    if random_labels:
-        y_train = np.random.randint(0, 10, size=n)
-
+    # finishing touches
     X_train = torch.tensor(X_train, device=device)
     X_test  = torch.tensor(X_test, device=device)
     y_train = torch.tensor(y_train, device=device)
     y_test  = torch.tensor(y_test, device=device)
-
     y_train_one_hot = torch.eye(10, device=device)[y_train]
     y_test_one_hot  = torch.eye(10, device=device)[y_test]
 

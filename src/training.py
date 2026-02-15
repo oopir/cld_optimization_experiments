@@ -290,6 +290,7 @@ def _train_multiseed_worker(
     device,
     n,
     random_labels,
+    reserve_last,
     eta,
     epochs,
     beta,
@@ -321,7 +322,7 @@ def _train_multiseed_worker(
     if dataset == "digits":
         data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
     elif dataset == "mnist":
-        data = load_mnist_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
+        data = load_mnist_data(n=n, random_labels=random_labels, device=device, seed=run_seed, reserve_last=reserve_last)
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
 
@@ -372,6 +373,7 @@ def train_multiseed(
     seeds,
     n,
     random_labels,
+    reserve_last,
     eta,
     epochs,
     beta,
@@ -403,6 +405,7 @@ def train_multiseed(
     args_except_seeds = (
         n,
         random_labels,
+        reserve_last,
         eta,
         epochs,
         beta,

@@ -13,9 +13,15 @@ os.environ["PYTHONPATH"] = str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH",
 
 import numpy as np
 import torch
-from sklearn.datasets import load_digits
+from sklearn.datasets import load_digits, fetch_openml
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    module="sklearn.datasets._openml",
+)
 
 from src.config import ExpConfig, load_checkpoint
 from src.model import TwoLayerNet
@@ -49,10 +55,33 @@ def _ex1_get_unused_digits(config: ExpConfig, num_points: int = 100, device: str
     # choose `num_points` unused points at random
     if unused_idx.shape[0] < num_points:
         raise ValueError(f"Requested {num_points} unused points, but only {unused_idx.shape[0]} are available.")
-    rng = np.random.default_rng(0)  # this was the same 100 points are chosen on each run of the script 
+    rng = np.random.default_rng(0)  # this way, the same 100 points are chosen on each run of the script 
     chosen_idx = rng.choice(unused_idx, size=num_points, replace=False)
     X_sel = torch.tensor(X[chosen_idx], device=device)
     y_sel = torch.tensor(y[chosen_idx], device=device)
+    return chosen_idx, X_sel, y_sel
+
+
+def _get_unused_mnist(config: ExpConfig, num_points: int = 100, device: str = "cpu", reserve_last=1000):
+    # download data from web
+    mnist = fetch_openml("mnist_784", version=1, as_frame=False)
+    X = mnist["data"].astype(np.float32)
+    y = mnist["target"].astype(np.int64)
+    
+    # preprocessing
+    X = X / 255.0
+    X = X - np.mean(X, axis=1, keepdims=True)
+    X = X / np.linalg.norm(X, axis=1, keepdims=True) * np.sqrt(X.shape[1])
+    X = X.astype(np.float32)
+    
+    # choose `num_points` unused points from the last `reserved_last` datapoints 
+    n_total  = X.shape[0]
+    last_idx = np.arange(n_total - reserve_last, n_total)
+    rng = np.random.default_rng(0)  # this way, the same 100 points are chosen on each run of the script 
+    chosen_idx = rng.choice(last_idx, size=num_points, replace=False)
+    X_sel = torch.tensor(X[chosen_idx], device=device)
+    y_sel = torch.tensor(y[chosen_idx], device=device)
+
     return chosen_idx, X_sel, y_sel
 
 
@@ -70,11 +99,11 @@ def compute_ex1_oos_predictions(
       - optionally save everything to disk.
     """
     results, config = load_checkpoint(ckpt_path)
-    idx_oos, X_oos, y_oos = _ex1_get_unused_digits(config, num_points=num_points, device=device)
+    idx_oos, X_oos, y_oos = _get_unused_mnist(config, num_points=num_points, device=device)
 
     all_preds = {}
-    for beta_key, by_seed in results.items():
-        beta_preds = {}
+    for k, by_seed in results.items():
+        preds_of_k = {}
         for seed, metrics in by_seed.items():
             if "lin_params_state" not in metrics:
                 continue
@@ -95,28 +124,15 @@ def compute_ex1_oos_predictions(
             with torch.no_grad():
                 nn_out = nn_model(X_oos).detach().cpu().reshape(-1)
 
-            # lin_model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, init_type=config.init_type).to(device)
-            # base_params_dict = {
-            #     name: init_state[name].to(device)
-            #     for name, _ in lin_model.named_parameters()
-            # }
-            # lin_params = [p.to(device) for p in lin_state]
-            # with torch.no_grad():
-            #     lin_out = linearized_forward(lin_model, base_params_dict, lin_params, X_oos)
-            #     lin_out = lin_out.detach().cpu().reshape(-1)
-
-            # # move lin_state and init_state to 'device'
+            # move lin_state and init_state to 'device'
             base_params_dict = {name: init_state[name].to(device) for name, _ in nn_model.named_parameters()}
             lin_params = [p.to(device) for p in lin_state]
             with torch.no_grad():
                 lin_out = linearized_forward(nn_model, base_params_dict, lin_params, X_oos)
                 lin_out = lin_out.detach().cpu().reshape(-1)
 
-            beta_preds[int(seed)] = {
-                "nn": nn_out.numpy(),
-                "lin": lin_out.numpy(),
-            }
-        all_preds[beta_key] = beta_preds
+            preds_of_k[int(seed)] = {"nn": nn_out.numpy(), "lin": lin_out.numpy()}
+        all_preds[k] = preds_of_k
 
     payload = {
         "ckpt_path": ckpt_path,
@@ -226,8 +242,8 @@ def plot_beta_distance_heatmap(D, labels, ckpt_path, beta_key, save_dir: Optiona
 def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), save_dir: Optional[str] = None):
     preds_all = payload["predictions"]
     # beta_keys = sorted(preds_all.keys())
-    beta_keys = preds_all.keys()
-    n_betas = len(beta_keys)
+    alpha_beta_keys = preds_all.keys()
+    n_betas = len(alpha_beta_keys)
     n_metrics = len(metrics)
 
     if save_dir is None:
@@ -247,13 +263,13 @@ def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), sav
         # precompute all matrices for this metric to share color scale
         D_dict = {}
         d_min, d_max = np.inf, -np.inf
-        for beta_key in beta_keys:
+        for beta_key in alpha_beta_keys:
             D, labels = compute_beta_distance_matrix(payload, beta_key, metric=metric)
             D_dict[beta_key] = (D, labels)
             d_min, d_max = min(d_min, float(D.min())), max(d_max, float(D.max()))
 
         im_for_cbar = None
-        for bi, beta_key in enumerate(beta_keys):
+        for bi, beta_key in enumerate(alpha_beta_keys):
             # get data
             D, labels = D_dict[beta_key]
             
@@ -292,7 +308,7 @@ def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), sav
 
 def main():
     ckpt_dir = "/home/ofirg/cld_checkpoints/expr1"
-    ckpt_name = "exp1_digits_20260210_004154.pt"
+    ckpt_name = "_mnist_20260215_152522.pt"
     ckpt_path = os.path.join(ckpt_dir , ckpt_name)
     payload = compute_ex1_oos_predictions(
         ckpt_path=ckpt_path,

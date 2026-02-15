@@ -14,6 +14,7 @@ class ExpConfig:
     dataset: str = "digits"
     n: int = 10
     random_labels: bool = False
+    reserve_last: int = 1000
     # model
     m: int = 1
     init_type: str = "standard"
@@ -44,6 +45,7 @@ class ExpConfig:
             dataset=self.dataset,
             n=self.n,
             random_labels=self.random_labels,
+            reserve_last=self.reserve_last,
             m=self.m,
             init_type=self.init_type,
             lam_fc1=self.lam_fc1,
