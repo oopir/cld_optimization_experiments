@@ -143,15 +143,15 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
     max_h = max(bb.y1 - bb.y0 for bb in bboxes_in.values())
     pad_lr, pad_top, pad_bottom = 0.03, 0.05, 0.0
 
-    # save each subplot separately
-    for name, ax in axes.items():
-        # make other subplots invisible (useful in case of overlapping content)
-        for a in axes.values():
-            a.set_visible(a is ax)
-        # save subplot
-        bb = bboxes_in[name]
-        bbox_equal = Bbox.from_extents(bb.x0 - pad_lr, bb.y0 - pad_bottom, bb.x0 + max_w + pad_lr, bb.y0 + max_h + pad_top)
-        fig.savefig(f"expr1_{name}.pdf", bbox_inches=bbox_equal)
+    # # save each subplot separately
+    # for name, ax in axes.items():
+    #     # make other subplots invisible (useful in case of overlapping content)
+    #     for a in axes.values():
+    #         a.set_visible(a is ax)
+    #     # save subplot
+    #     bb = bboxes_in[name]
+    #     bbox_equal = Bbox.from_extents(bb.x0 - pad_lr, bb.y0 - pad_bottom, bb.x0 + max_w + pad_lr, bb.y0 + max_h + pad_top)
+    #     fig.savefig(f"expr1_{name}.pdf", bbox_inches=bbox_equal)
 
     # restore full figure and save it
     for a in axes.values():

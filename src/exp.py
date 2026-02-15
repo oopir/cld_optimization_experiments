@@ -59,11 +59,13 @@ def _apply_config_overrides(base: ExpConfig, override_src: ExpConfig, override_k
     for k in override_keys:
         if k not in [
             "eta", 
+            "eta_table_path",
             "regularization_scale", 
             "same_noise", 
             "jac_probe_size", 
             "device", 
-            "print_every"
+            "print_every",
+            "collect_feature_stats"
         ]:
             raise ValueError(f"Error: overriding {k} is not supported yet.")
     

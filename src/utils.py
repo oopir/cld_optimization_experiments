@@ -1,7 +1,7 @@
 import subprocess
 import torch
 
-def _get_idle_gpus(util_threshold=7):
+def _get_idle_gpus(util_threshold=8):
     try:
         out = subprocess.check_output(["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"], encoding="utf-8")
     except Exception:
@@ -20,7 +20,7 @@ def _get_idle_gpus(util_threshold=7):
     idle = [i for i, u in enumerate(utils) if u <= util_threshold]
     return idle[:util_threshold]
 
-def select_idle_gpus_for_experiment(device="cuda", util_threshold=7):
+def select_idle_gpus_for_experiment(device="cuda", util_threshold=8):
     """
     Decide once which GPUs to use for the whole experiment.
     - For CPU: returns [None].

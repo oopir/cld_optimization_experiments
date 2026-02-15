@@ -10,24 +10,30 @@ warnings.filterwarnings(
 )
 
 def load_digits_data(n, random_labels=False, device="cpu", seed=42):
+    # download data from web
     digits = load_digits()
-    X = digits.data.astype(np.float32) / 16.0 # scale to [0,1]
+    X = digits.data.astype(np.float32)
+    y = digits.target.astype(np.int64)
+
+    # preprocessing
+    X = X / 16.0
     X = X - np.mean(X, axis=1, keepdims=True)
     X = X / np.linalg.norm(X, axis=1, keepdims=True) * np.sqrt(X.shape[1]) # normalize to \sqrt{d} norm
     X = X.astype(np.float32)
-    y = digits.target.astype(np.int64)
-
+    
+    # train-validation split
     X_train, X_tmp, y_train, y_tmp = train_test_split(X, y, train_size=n, stratify=y, random_state=seed)
     _, X_test, _, y_test = train_test_split(X_tmp, y_tmp, test_size=max(100, n//5), stratify=y_tmp, random_state=seed)
 
+    # randomize train labels (if requrested)
     if random_labels:
         y_train = np.random.randint(0, 10, size=n)
 
+    # finishing touches
     X_train = torch.tensor(X_train, device=device)
     X_test  = torch.tensor(X_test, device=device)
     y_train = torch.tensor(y_train, device=device)
     y_test  = torch.tensor(y_test, device=device)
-
     y_train_one_hot = torch.eye(10, device=device)[y_train]
     y_test_one_hot  = torch.eye(10, device=device)[y_test]
 
