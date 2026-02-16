@@ -29,6 +29,10 @@ class ExpConfig:
     regularization_scale: float = 1.0
     lam_fc1: Optional[float] = None
     lam_fc2: Optional[float] = None
+    # early stopping
+    early_stop_metric: Optional[str] = None
+    early_stop_goal: str = "min"
+    early_stop_value: Optional[float] = None
     # stats
     use_linearized: bool = True
     same_noise: bool = False
@@ -53,6 +57,9 @@ class ExpConfig:
             epochs=self.epochs,
             eta=self.eta,
             regularization_scale=self.regularization_scale,
+            early_stop_metric=self.early_stop_metric,
+            early_stop_goal=self.early_stop_goal,
+            early_stop_value=self.early_stop_value,
             use_linearized=self.use_linearized,
             same_noise=self.same_noise,
             track_jacobian=self.track_jacobian,

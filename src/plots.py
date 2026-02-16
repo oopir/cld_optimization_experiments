@@ -21,8 +21,14 @@ mpl.rcParams.update(
 
 def _mean_std_across_seeds(results_by_seed, key):
     histories = [np.asarray(r[key]) for r in results_by_seed.values()]
-    arr = np.stack(histories, axis=0)  # (n_seeds, T)
-    return arr.mean(axis=0), arr.std(axis=0)
+    
+    # truncate histories to the same length (different seeds might haved reached early stopping at different times)
+    min_len = min(h.shape[0] for h in histories)
+    histories = [h[:min_len] for h in histories]
+    
+    arr = np.stack(histories, axis=0)
+    
+    return arr.mean(axis=0), arr.std(axis=0), min_len
 
 def _plot_band(ax, x, mean, std, label, color, lin=False, lw=2.0):
     linestyle = "--" if lin else "-"
@@ -74,22 +80,36 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
 
     # ------------------------ actual plotting ------------------------ #
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
-    # infer x from epoch_hist if present; else fall back to track_every (present only for perviously corrupted ckpts)
+    # infer x from epoch_hist if present; else fall back to track_every
     sample_beta_key = next(iter(results.keys()))
     sample_seed_key = next(iter(results[sample_beta_key].keys()))
     sample_metrics = results[sample_beta_key][sample_seed_key]
 
-    if "epoch_hist" in sample_metrics:
-        x = np.asarray(sample_metrics["epoch_hist"])
-    else:
-        x = np.arange(1, epochs + 1, track_every)
+    # if "epoch_hist" in sample_metrics:
+    #     base_x = np.asarray(sample_metrics["epoch_hist"])
+    # else:
+    #     base_x = np.arange(1, epochs + 1, track_every)
 
     for run_name, run_results_by_seed in results.items():
         c = next(colors)
 
+        # per-run x: prefer epoch_hist if present, else infer from train_loss_hist length
+        some_seed_metrics = next(iter(run_results_by_seed.values()))
+        if "epoch_hist" in some_seed_metrics:
+            base_x = np.asarray(some_seed_metrics["epoch_hist"])
+        else:
+            lengths = [len(r["train_loss_hist"]) for r in run_results_by_seed.values()]
+            T_run = max(lengths) if lengths else 0
+            base_x = np.arange(1, T_run * track_every + 1, track_every)
+
         # jacobian distances
         if has_jacobian_any:
             jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]
+            
+            min_len = min(h.shape[0] for h in jac_histories)
+            jac_histories = [h[:min_len] for h in jac_histories]
+            x = base_x[:min_len]
+
             jac_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
             l2_mean = jac_arr[:, :, 0].mean(axis=0)
             l2_std  = jac_arr[:, :, 0].std(axis=0)
@@ -102,6 +122,11 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         # param distances
         if use_linearized:
             param_histories = [np.asarray(r["nn_lin_param_dist_hist"]) for r in run_results_by_seed.values()]
+            
+            min_len = min(h.shape[0] for h in param_histories)
+            param_histories = [h[:min_len] for h in param_histories]
+            x = base_x[:min_len]
+            
             param_arr = np.stack(param_histories, axis=0)  # (n_seeds, T, 2)
             l2_mean = param_arr[:, :, 0].mean(axis=0)
             l2_std  = param_arr[:, :, 0].std(axis=0)
@@ -112,23 +137,28 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
             _plot_band(axes["nn_to_lin_dist_co"], x, co_mean, co_std, label=run_name, color=c)
 
         # relative feature distance
-        mean, std = _mean_std_across_seeds(run_results_by_seed, "feat_rel_dist_hist")
+        mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_rel_dist_hist")
         mean[0] = max(mean[0], 1e-12)
+        x = base_x[:L]
         _plot_band(axes["feat_rel_dist"], x, mean, std, label=run_name, color=c)
 
         # cosine feature distance
-        mean, std = _mean_std_across_seeds(run_results_by_seed, "feat_cos_dist_hist")
+        mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_cos_dist_hist")
+        x = base_x[:L]
         _plot_band(axes["feat_cos_dist"], x, mean, std, label=run_name, color=c)
 
         # min eigenvalue of Gram(A_t)
-        mean, std = _mean_std_across_seeds(run_results_by_seed, "feat_gram_lambda_hist")
+        mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_gram_lambda_hist")
+        x = base_x[:L]
         _plot_band(axes["feat_gram_lambda"], x, mean, std, label=run_name, color=c)
 
         # accuracy/loss (nonlinear vs linearized)
-        mean, std = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
+        mean, std, L = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
+        x = base_x[:L]
         _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.0)
         if use_linearized:
-            mean, std = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
+            mean, std, L = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
+            x = base_x[:L]
             _plot_band(axes["train_loss"], x, mean, std, label="linear", color=c, lin=True, lw=1.0)
 
     # define legends (needs to be done after plotting for choice of placement) and "draw"

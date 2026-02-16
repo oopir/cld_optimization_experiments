@@ -62,6 +62,9 @@ def _apply_config_overrides(base: ExpConfig, override_src: ExpConfig, override_k
             "eta_table_path",
             "regularization_scale", 
             "same_noise", 
+            "early_stop_metric",
+            "early_stop_goal",
+            "early_stop_value",
             "jac_probe_size", 
             "device", 
             "print_every",
@@ -224,6 +227,9 @@ def _tune_eta_for_pair(
     cfg.eta_mode = "scalar"
     cfg.eta_table_path = None
     cfg.eta_default = None
+    cfg.early_stop_metric = None
+    cfg.early_stop_value = None
+    cfg.early_stop_goal = "min"
 
     hist_key = f"{metric_name}_hist"
     best_eta: Optional[float] = None
@@ -405,6 +411,8 @@ def _write_base_ckpt_data_for_beta_to_disk(
             "start_model_state_dict": metrics["model_state_dict"],
             "start_lin_params": metrics.get("lin_params_state"),
             "rng_state": metrics.get("rng_state"),
+            "last_epoch": metrics.get("last_epoch"),
+            "stopped_early": metrics.get("stopped_early", False),
         }
         path = dirr / f"seed_{seed}.pt"
         torch.save(payload, path)
@@ -460,8 +468,34 @@ def _train_over_range(
 def _merge_metrics(base: Mapping[str, Any], extra: Mapping[str, Any]) -> Dict[str, Any]:
     base_keys = set(base.keys())
     extra_keys = set(extra.keys())
+
+    # allow new-style metrics to exist only in the resumed run
+    allowed_new_keys = {"epoch_hist", "last_epoch", "stopped_early"}
     if base_keys != extra_keys:
-        raise ValueError(f"Metric keys differ between base and extra runs: {base_keys ^ extra_keys}")
+        diff = base_keys ^ extra_keys
+        unexpected = diff - allowed_new_keys
+        if unexpected:
+            raise ValueError(f"Metric keys differ between base and extra runs: {unexpected}")
+
+    # if the resumed run produced no new history at all, keep base metrics
+    has_new_hist = False
+    for k in extra_keys:
+        if not k.endswith("_hist"):
+            continue
+        v = extra[k]
+        if v is None:
+            continue
+        if isinstance(v, list) and len(v) > 0:
+            has_new_hist = True
+            break
+        if torch.is_tensor(v) and v.numel() > 0:
+            has_new_hist = True
+            break
+        if isinstance(v, np.ndarray) and v.size > 0:
+            has_new_hist = True
+            break
+    if not has_new_hist:
+        return dict(base)
 
     merged: Dict[str, Any] = {}
 
@@ -493,6 +527,21 @@ def _merge_metrics(base: Mapping[str, Any], extra: Mapping[str, Any]) -> Dict[st
 
     return merged
 
+def _infer_last_epoch_from_results(results: ResultsByLabel, fallback_epochs: int) -> int:
+    last_epochs: List[int] = []
+    for per_label in results.values():
+        for metrics in per_label.values():
+            value = metrics.get("last_epoch")
+            if value is None:
+                continue
+            try:
+                last_epochs.append(int(value))
+            except (TypeError, ValueError):
+                continue
+    if last_epochs:
+        return max(last_epochs)
+    return fallback_epochs
+
 def resume_from_ckpt(
     base_results: ResultsByLabel,
     config: ExpConfig,
@@ -501,8 +550,9 @@ def resume_from_ckpt(
     tmp_dir: Path,
 ) -> Tuple[ResultsByLabel, ExpConfig]:
     # some validation
-    if new_epochs <= config.epochs:
-        raise ValueError(f"new_epochs ({new_epochs}) must be > existing epochs ({config.epochs})")
+    base_effective_epochs = _infer_last_epoch_from_results(base_results, config.epochs)
+    if new_epochs <= base_effective_epochs:
+        raise ValueError(f"new_epochs ({new_epochs}) must be > existing epochs ({base_effective_epochs})")
     if len(config.alphas) == 0:
         expected_labels = [label_from_alpha_beta(beta=beta, n=config.n) for beta in config.betas]
     else:
@@ -522,7 +572,8 @@ def resume_from_ckpt(
     # train
     print(f"extending to a new total of {new_epochs} epochs...")
     extra_cfg = replace(config, epochs=new_epochs)
-    new_results: ResultsByLabel = _train_over_range(extra_cfg, config.alphas, config.betas, gpu_ids, resume_root, base_results, config.epochs)
+    new_results: ResultsByLabel = \
+        _train_over_range(extra_cfg, config.alphas, config.betas, gpu_ids, resume_root, base_results, base_effective_epochs)
 
     # merge base + new
     merged_results: ResultsByLabel = {}
@@ -535,7 +586,9 @@ def resume_from_ckpt(
             merged_seed_metrics[seed] = _merge_metrics(base_seed_metrics[seed], extra_seed_metrics[seed])
         merged_results[label] = merged_seed_metrics
 
-    new_config = replace(config, epochs=new_epochs)
+    final_epochs = _infer_last_epoch_from_results(merged_results, new_epochs)
+    new_config = replace(config, epochs=final_epochs)
+    
     return merged_results, new_config
 
 # -------------------------------------------------------------------------- #
@@ -577,6 +630,8 @@ def run_exp(config: ExpConfig, run_opts: RunOpts, gpu_ids: List[int],) -> Tuple[
         exp_config = config
         _print_exp_config(exp_config)
         results = _train_over_range(config, config.alphas, config.betas, gpu_ids)
+        final_epochs = _infer_last_epoch_from_results(results, config.epochs)
+        exp_config = replace(config, epochs=final_epochs)
 
     if run_opts.save_ckpt:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

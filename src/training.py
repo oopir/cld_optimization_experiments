@@ -109,6 +109,7 @@ def _init_metrics(track_jacobian):
         metrics[f"{name}_hist"] = []
     metrics["nn_to_lin_hist"] = []
     metrics["nn_lin_param_dist_hist"] = []
+    metrics["epoch_hist"] = []
     return metrics
 
 # -------------------------------------------------------------------------- #
@@ -152,6 +153,9 @@ def train(
     resume_rng_state=None,
     epoch_offset=0,
     collect_feature_stats=True,
+    early_stop_metric=None,
+    early_stop_goal="min",
+    early_stop_value=None,
 ):
 
     # --------- init environment & compute values at init for stats -------- #
@@ -191,6 +195,7 @@ def train(
         A0_norm = A0.norm().item()
 
     metrics = _init_metrics(track_jacobian)
+    metrics["stopped_early"] = False
 
     if start_model_state_dict is not None:
         model.load_state_dict(start_model_state_dict)
@@ -198,15 +203,22 @@ def train(
     if resume_rng_state is not None:
         _load_rng_state(device, resume_rng_state)
 
-    print(f"training starts for alpha={alpha}, beta={beta}, eta={eta} from epoch={epoch_offset+1} on device {device}...", flush=True)
+    if epoch_offset < epochs:
+        print(f"device {device}: training starts for alpha={alpha}, beta={beta}, eta={eta} from epoch={epoch_offset+1}...", flush=True)
+    else:
+        print(f"device {device}: no need to train for alpha={alpha}, beta={beta} (early stopping triggered)")
     stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats)
     sup_sigma_max_v = stats["sigma_max_v"]
     # print(f"epoch {0:8d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
 
+    last_epoch = epoch_offset
     for epoch in range(epoch_offset + 1, epochs + 1):
+        last_epoch = epoch
         # -------------------- compute metrics and stats -------------------- #
         model.eval()
         if track_every == 1 or epoch % track_every == 1:
+            metrics["epoch_hist"].append(epoch)
+
             stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats)
             for name in BASE_METRIC_NAMES:
                 metrics[f"{name}_hist"].append(stats[name])
@@ -239,6 +251,24 @@ def train(
                     flush=True
                 )
 
+            # stop early (if needed)
+            if early_stop_metric is not None and early_stop_value is not None:
+                # get the value that should dictate stopping
+                if early_stop_metric in stats:
+                    cur = stats[early_stop_metric]
+                elif use_linearized and 'lin_' in early_stop_metric and early_stop_metric in lin_stats:
+                    cur = lin_stats[early_stop_metric]
+                else:
+                    cur = None
+                # decide whether to stop or continue
+                if cur is not None:
+                    goal = early_stop_goal
+                    if (goal == "min" and cur <= early_stop_value) or (goal == "max" and cur >= early_stop_value):
+                        print(f"device {device}: early stopping, epoch={epoch}, {early_stop_metric}={cur:.3f}")
+                        metrics["stopped_early"] = True
+                        break
+
+
         # ------------------ compute grads & perform steps ------------------ #
         # NN forward + backward
         model.train()
@@ -267,6 +297,7 @@ def train(
                 langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
                 langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
 
+    metrics["last_epoch"] = last_epoch
     metrics["rng_state"] = _save_rng_state(device)
 
     # -------------------- compute remaining stats --------------------- #
@@ -309,6 +340,9 @@ def _train_multiseed_worker(
     resume_paths=None,
     epoch_offset=0,
     collect_feature_stats=True, 
+    early_stop_metric=None,
+    early_stop_goal="min",
+    early_stop_value=None,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -330,6 +364,8 @@ def _train_multiseed_worker(
     start_state = None
     start_lin_params = None
     rng_state = None
+    last_epoch = None
+    stopped_early = False
     if resume_paths is not None:
         p = resume_paths.get(run_seed)
         if p is not None:
@@ -338,11 +374,24 @@ def _train_multiseed_worker(
             start_state = resume.get("start_model_state_dict", None)
             start_lin_params = resume.get("start_lin_params", None)
             rng_state = resume.get("rng_state", None)
+            last_epoch = resume.get("last_epoch", None)
+            stopped_early = resume.get("stopped_early", False)
+
+    # decide how many epochs (and from what offset) this seed should actually run
+    call_epoch_offset = epoch_offset
+    call_epochs = epochs
+    if stopped_early:
+        if last_epoch is not None:
+            call_epoch_offset = int(last_epoch)
+            call_epochs = int(last_epoch)
+        else: # fallback
+            call_epoch_offset = epoch_offset
+            call_epochs = epoch_offset
 
     metrics = train(
         data=data,
         eta=eta,
-        epochs=epochs,
+        epochs=call_epochs,
         beta=beta,
         m=m,
         init_type=init_type,
@@ -361,8 +410,11 @@ def _train_multiseed_worker(
         start_model_state_dict=start_state,
         start_lin_params=start_lin_params,
         resume_rng_state=rng_state,
-        epoch_offset=epoch_offset,
+        epoch_offset=call_epoch_offset,
         collect_feature_stats=collect_feature_stats, 
+        early_stop_metric=early_stop_metric,
+        early_stop_goal=early_stop_goal,
+        early_stop_value=early_stop_value,
     )
 
     return run_seed, metrics
@@ -393,7 +445,10 @@ def train_multiseed(
     epoch_offset=0,
     gpu_ids=None,
     resume_paths=None,
-    collect_feature_stats=True, 
+    collect_feature_stats=True,  
+    early_stop_metric=None,
+    early_stop_goal="min",
+    early_stop_value=None,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -424,6 +479,9 @@ def train_multiseed(
         resume_paths,
         epoch_offset,
         collect_feature_stats,
+        early_stop_metric,
+        early_stop_goal,
+        early_stop_value,
     )
 
     # create a list of gpu ids & set gpus to spawn
