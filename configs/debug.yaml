@@ -1,15 +1,14 @@
 experiment:
-  seeds: [0,1,2,3,4,5,6,7]
+  seeds: [0,1,2,3]
   n: 30000
   random_labels: false
   reserve_last: 1000
-  # alphas: [0.05, 0.15, 0.5, 1.5, 5, 15, 50]
   alphas: [50, 15, 5, 1.5, 0.5, 0.15]
   betas: [.inf]
-  epochs: 30000
+  epochs: 50000
   eta: 1.0e-2
   eta_mode: per_alpha_beta # scalar / per_beta / per_alpha_beta (should match what it was set to in 'eta_tuning:' block)
-  eta_table_path: "configs/tuning/etas_mnist.yaml" # fill this when you use fine-tuned values
+  eta_table_path: "configs/tuning/etas_mnist_ce.yaml" # fill this when you use fine-tuned values
   eta_default: 1.0e-2
   m: 10000
   dataset: mnist
@@ -24,17 +23,17 @@ experiment:
   jac_probe_size: 1
   device: cuda
   track_every: 100
-  print_every: 5000
+  print_every: 100
   collect_feature_stats: false
 
 run:
   ckpt_dir: "~/cld_checkpoints/expr1"
   save_ckpt: true
   # load_ckpt: true
-  # load_ckpt_name: ".pt"
+  # load_ckpt_name: "_mnist_20260216_131910.pt"
   # resume_from_ckpt: true
-  # new_total_epochs: 3000
-  # config_overrides: ["print_every"]
+  # new_total_epochs: 500
+  # config_overrides: ["print_every", "early_stop_metric", "early_stop_goal", "early_stop_value"]
 
 eta_tuning:
   enabled: false # set to false when not tuning
@@ -44,5 +43,5 @@ eta_tuning:
   # tuning_seeds: [0] # currently only one seed supported because of parallelization over (alpha,beta), need to modify this
   # metric: train_loss
   # goal: min
-  # output_path: "configs/tuning/etas_mnist.yaml"
+  # output_path: "configs/tuning/etas_mnist_ce.yaml"
   # force: true

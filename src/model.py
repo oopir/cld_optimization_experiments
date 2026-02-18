@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class TwoLayerNet(nn.Module):
     # don't rely on alpha's default value, as train_multiseed also has a 
@@ -62,7 +63,17 @@ class TwoLayerNet(nn.Module):
         return x
 
 def loss_fn(outputs, targets):
-    return torch.nn.functional.mse_loss(outputs, targets)
+    # Case 1: integer class indices
+    if targets.dtype in (torch.int64, torch.int32, torch.int16, torch.int8):
+        return F.cross_entropy(outputs, targets)
+
+    # Case 2: one-hot / soft labels
+    if targets.dim() == 2 and targets.shape == outputs.shape and targets.dtype.is_floating_point:
+        log_probs = F.log_softmax(outputs, dim=1)
+        loss_per_sample = -(targets * log_probs).sum(dim=1)
+        return loss_per_sample.mean()
+
+    raise ValueError(...)
 
 # ---------------------------------------------------------------------------
 # Diagonal lambda (per-parameter) construction

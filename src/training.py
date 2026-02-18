@@ -206,7 +206,7 @@ def train(
     if epoch_offset < epochs:
         print(f"device {device}: training starts for alpha={alpha}, beta={beta}, eta={eta} from epoch={epoch_offset+1}...", flush=True)
     else:
-        print(f"device {device}: no need to train for alpha={alpha}, beta={beta} (early stopping triggered)")
+        print(f"device {device}: no need to train for alpha={alpha}, beta={beta} (early stopping triggered)", flush=True)
     stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats)
     sup_sigma_max_v = stats["sigma_max_v"]
     # print(f"epoch {0:8d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
@@ -246,8 +246,8 @@ def train(
                     f"device {device} | "
                     f"epoch {epoch:8d} | "
                     f"loss {stats['train_loss']:.4f} | "
-                    f"train acc {stats['train_acc']:.3f} | "
-                    f"test acc {stats['test_acc']:.3f}",
+                    f"train acc {stats['train_acc']:.4f} | "
+                    f"test acc {stats['test_acc']:.4f}",
                     flush=True
                 )
 
@@ -264,7 +264,7 @@ def train(
                 if cur is not None:
                     goal = early_stop_goal
                     if (goal == "min" and cur <= early_stop_value) or (goal == "max" and cur >= early_stop_value):
-                        print(f"device {device}: early stopping, epoch={epoch}, {early_stop_metric}={cur:.3f}")
+                        print(f"device {device}: early stopping, epoch={epoch}, {early_stop_metric}={cur:.3f}", flush=True)
                         metrics["stopped_early"] = True
                         break
 
