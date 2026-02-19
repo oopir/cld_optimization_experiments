@@ -264,7 +264,7 @@ def train(
                 if cur is not None:
                     goal = early_stop_goal
                     if (goal == "min" and cur <= early_stop_value) or (goal == "max" and cur >= early_stop_value):
-                        print(f"device {device}: early stopping, epoch={epoch}, {early_stop_metric}={cur:.3f}", flush=True)
+                        print(f"device {device}: early stopping, epoch={epoch}, {early_stop_metric}={cur:.4f}", flush=True)
                         metrics["stopped_early"] = True
                         break
 

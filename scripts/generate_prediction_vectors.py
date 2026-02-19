@@ -275,8 +275,9 @@ def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), sav
             
             # set subplot
             ax = axes[mi, bi]
-            im = ax.imshow(D, vmin=d_min, vmax=d_max)
-            im_for_cbar = im
+            # im = ax.imshow(D, vmin=d_min, vmax=d_max)
+            im = ax.imshow(D)
+            # im_for_cbar = im
             ax.set_aspect("equal")
 
             if mi == n_metrics - 1:
@@ -297,8 +298,8 @@ def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), sav
             if mi == 0:
                 ax.set_title(f"{beta_key}", fontsize=9)
 
-        # one colorbar per metric row
-        fig.colorbar(im_for_cbar, ax=axes[mi, :].ravel().tolist(), location="right", shrink=0.8)
+            # one colorbar per metric row
+            fig.colorbar(im, ax=ax, location="right", shrink=0.8)
 
     fig.savefig(out_png, dpi=200)
     plt.close(fig)
@@ -308,7 +309,7 @@ def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), sav
 
 def main():
     ckpt_dir = "/home/ofirg/cld_checkpoints/expr1"
-    ckpt_name = "_mnist_20260215_152522.pt"
+    ckpt_name = "_mnist_20260219_123918.pt"
     ckpt_path = os.path.join(ckpt_dir , ckpt_name)
     payload = compute_ex1_oos_predictions(
         ckpt_path=ckpt_path,
