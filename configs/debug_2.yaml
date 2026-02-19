@@ -1,43 +1,47 @@
 experiment:
-  seeds: [0,1,2,3,4]
+  seeds: [0]
   n: 30000
   random_labels: false
-  alphas: [0.05]
+  reserve_last: 1000
+  alphas: [50, 15, 5, 1.5, 0.5, 0.15]
   betas: [.inf]
-  epochs: 1000
+  epochs: 500
   eta: 1.0e-2
-  eta_mode: scalar # scalar / per_beta / per_alpha_beta (should match what it was set to in 'eta_tuning:' block)
-  eta_table_path: null # fill this when you use fine-tuned values
-  eta_default: null
+  # eta_mode: per_alpha_beta # scalar / per_beta / per_alpha_beta (should match what it was set to in 'eta_tuning:' block)
+  # eta_table_path: "configs/tuning/etas_mnist_ce.yaml" # fill this when you use fine-tuned values
+  eta_default: 1.0e-2
   m: 10000
   dataset: mnist
   init_type: alpha
   regularization_scale: 1
-  use_linearized: false
+  # early_stop_metric: train_acc
+  # early_stop_goal: max
+  # early_stop_value: 0.999
+  use_linearized: true
   same_noise: false
   track_jacobian: false
   jac_probe_size: 1
   device: cuda
-  track_every: 50
-  print_every: 250
+  track_every: 10
+  print_every: 200
   collect_feature_stats: false
 
 run:
   ckpt_dir: "~/cld_checkpoints/expr1"
-  # save_ckpt: true
+  save_ckpt: false
   # load_ckpt: true
-  # load_ckpt_name: "_mnist_20260215_141159.pt"
+  # load_ckpt_name: "_mnist_20260216_131910.pt"
   # resume_from_ckpt: true
-  # new_total_epochs: 2000
-  # config_overrides: ['print_every']
+  # new_total_epochs: 500
+  # config_overrides: ["print_every", "early_stop_metric", "early_stop_goal", "early_stop_value"]
 
 eta_tuning:
   enabled: true # set to false when not tuning
   mode: per_alpha_beta
-  eta_grid: [1.0e-5, 1.0e-4, 1.0e-3]
-  tuning_epochs: 5000
+  eta_grid: [1.0e-3, 1.0e-2, 1.0e-1, 1.0e+0, 1.0e+1]
+  tuning_epochs: 500
   tuning_seeds: [0] # currently only one seed supported because of parallelization over (alpha,beta), need to modify this
   metric: train_loss
   goal: min
-  output_path: "configs/tuning/etas_mnist_debug.yaml"
+  output_path: "configs/tuning/etas_mnist_ce.yaml"
   force: true

@@ -23,7 +23,7 @@ experiment:
   jac_probe_size: 1
   device: cuda
   track_every: 100
-  print_every: 100
+  print_every: 2500
   collect_feature_stats: false
 
 run:
