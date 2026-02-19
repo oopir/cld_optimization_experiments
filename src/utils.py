@@ -17,7 +17,7 @@ def _get_idle_gpus(util_threshold=8):
         except ValueError:
             return None
 
-    idle = [i for i, u in enumerate(utils) if u <= util_threshold]
+    idle = [i for i, u in enumerate(utils) if u == 200]
     return idle[:util_threshold]
 
 def select_idle_gpus_for_experiment(device="cuda", util_threshold=8):
