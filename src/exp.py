@@ -297,7 +297,7 @@ def tune_eta_for_exp(base_config: ExpConfig, tuning_cfg: Mapping[str, Any], gpu_
     metric_name   = tuning_cfg.get("metric", "train_loss")  # base name -> "<name>_hist"
     goal          = tuning_cfg.get("goal", "min")
     alphas        = base_config.alphas or [1.0]
-    betas         = base_config.betas
+    betas         = [np.inf if b==".inf" else float(b) for b in base_config.betas]
 
     partial_args  = (base_config, eta_grid, tuning_epochs, tuning_seeds[0], metric_name, goal)
 
