@@ -1,0 +1,5 @@
+per_alpha_beta:
+  alpha=1,beta=300000: 0.1
+  alpha=1,beta=3000000: 0.1
+  alpha=1,beta=30000000: 0.1
+  alpha=1,beta=inf: 0.1
