@@ -43,6 +43,10 @@ def build_from_config_mapping(cfg: dict) -> tuple[ExpConfig, RunOpts]:
     else:
         exp_kwargs = exp_section
         run_kwargs = run_section or {}
+
+    # fix bug
+    exp_kwargs["betas"] = [np.inf if b==".inf" else float(b) for b in exp_kwargs["betas"]]
+
     exp_config = ExpConfig(**exp_kwargs)
 
     if "ckpt_dir" in run_kwargs:
@@ -50,6 +54,8 @@ def build_from_config_mapping(cfg: dict) -> tuple[ExpConfig, RunOpts]:
     if "load_ckpt_name" in run_kwargs:
         run_kwargs["load_ckpt_name"] = Path(run_kwargs["load_ckpt_name"]).expanduser()
     run_opts = RunOpts(**run_kwargs)
+
+
 
     return exp_config, run_opts
 
@@ -113,11 +119,12 @@ def _format_scalar_for_key(x: float) -> str:
 def label_from_alpha_beta(alpha=None, beta=None, n=None):
     label = ""
     if alpha is not None:
-        label += f"α={alpha:.0e} "
+        label += f"α={alpha:.2e} "
     if n is None:
-        label += f"β={beta}"
+        label += f"β={beta:.2e}"
     else:
-        label += "β=" + ("inf" if math.isinf(beta) else f"{beta // n}n")
+        # label += "β=" + ("inf" if math.isinf(beta) else f"{beta // n}n")
+        label += f"β={beta:.2e}"
     return label
 
 def _load_eta_table(path: Path) -> Dict[str, Any]:
@@ -297,7 +304,7 @@ def tune_eta_for_exp(base_config: ExpConfig, tuning_cfg: Mapping[str, Any], gpu_
     metric_name   = tuning_cfg.get("metric", "train_loss")  # base name -> "<name>_hist"
     goal          = tuning_cfg.get("goal", "min")
     alphas        = base_config.alphas or [1.0]
-    betas         = [np.inf if b==".inf" else float(b) for b in base_config.betas]
+    betas         = base_config.betas or [np.inf]
 
     partial_args  = (base_config, eta_grid, tuning_epochs, tuning_seeds[0], metric_name, goal)
 
