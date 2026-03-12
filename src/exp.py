@@ -71,6 +71,7 @@ def _apply_config_overrides(base: ExpConfig, override_src: ExpConfig, override_k
             "early_stop_metric",
             "early_stop_goal",
             "early_stop_value",
+            "noise_free_after_epoch",
             "jac_probe_size", 
             "device", 
             "print_every",

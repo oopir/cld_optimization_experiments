@@ -29,6 +29,7 @@ class ExpConfig:
     regularization_scale: float = 1.0
     lam_fc1: Optional[float] = None
     lam_fc2: Optional[float] = None
+    noise_free_after_epoch: Optional[int] = None
     # early stopping
     early_stop_metric: Optional[str] = None
     early_stop_goal: str = "min"
@@ -54,6 +55,7 @@ class ExpConfig:
             init_type=self.init_type,
             lam_fc1=self.lam_fc1,
             lam_fc2=self.lam_fc2,
+            noise_free_after_epoch=getattr(self, "noise_free_after_epoch", None),
             epochs=self.epochs,
             eta=self.eta,
             regularization_scale=self.regularization_scale,

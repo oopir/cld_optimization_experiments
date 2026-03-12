@@ -139,6 +139,7 @@ def train(
     alpha=1.0,
     lam_fc1=None,
     lam_fc2=None,
+    noise_free_after_epoch=None,
     regularization_scale=1.0,
     use_linearized=True,
     same_noise=False,
@@ -287,15 +288,20 @@ def train(
             else:
                 lin_train_loss = loss_fn(lin_outputs, data["y_train"])
             lin_train_loss.backward()
+
+        # select effective β (optionally disable noise after a threshold)
+        deterministic = noise_free_after_epoch is not None and epoch > noise_free_after_epoch
+        current_beta = float("inf") if deterministic else beta
+
         # training step(s)
         if not use_linearized:
-            langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+            langevin_step(params, lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
         else:
             if same_noise:
-                joint_langevin_step(params, lam_tensors, lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+                joint_langevin_step(params, lam_tensors, lin_params, lin_lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
             else:
-                langevin_step(params, lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
-                langevin_step(lin_params, lin_lam_tensors, beta=beta, eta=eta, regularization_scale=regularization_scale)
+                langevin_step(params, lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
+                langevin_step(lin_params, lin_lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
 
     metrics["last_epoch"] = last_epoch
     metrics["rng_state"] = _save_rng_state(device)
@@ -339,6 +345,7 @@ def _train_multiseed_worker(
     print_every,
     resume_paths=None,
     epoch_offset=0,
+    noise_free_after_epoch=None,
     collect_feature_stats=True, 
     early_stop_metric=None,
     early_stop_goal="min",
@@ -398,6 +405,7 @@ def _train_multiseed_worker(
         alpha=alpha,
         lam_fc1=lam_fc1,
         lam_fc2=lam_fc2,
+        noise_free_after_epoch=noise_free_after_epoch,
         regularization_scale=regularization_scale,
         use_linearized=use_linearized,
         same_noise=same_noise,
@@ -443,6 +451,7 @@ def train_multiseed(
     track_every=1,
     print_every=100,
     epoch_offset=0,
+    noise_free_after_epoch=None,
     gpu_ids=None,
     resume_paths=None,
     collect_feature_stats=True,  
@@ -478,6 +487,7 @@ def train_multiseed(
         print_every,
         resume_paths,
         epoch_offset,
+        noise_free_after_epoch,
         collect_feature_stats,
         early_stop_metric,
         early_stop_goal,
