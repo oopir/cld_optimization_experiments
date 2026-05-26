@@ -43,6 +43,9 @@ def build_from_config_mapping(cfg: dict) -> tuple[ExpConfig, RunOpts]:
     else:
         exp_kwargs = exp_section
         run_kwargs = run_section or {}
+
+    exp_kwargs["betas"] = [np.inf if b==".inf" else float(b) for b in exp_kwargs["betas"]]
+
     exp_config = ExpConfig(**exp_kwargs)
 
     if "ckpt_dir" in run_kwargs:
@@ -117,7 +120,7 @@ def label_from_alpha_beta(alpha=None, beta=None, n=None):
     if n is None:
         label += f"β={beta}"
     else:
-        label += "β=" + ("inf" if math.isinf(beta) else f"{beta // n}n")
+        label += f"β={beta:.2e}"
     return label
 
 def _load_eta_table(path: Path) -> Dict[str, Any]:
@@ -153,18 +156,9 @@ def _resolve_eta(config: ExpConfig, alpha: float, beta: float) -> float:
 
     if mode == "per_beta":
         per_beta = table.get("per_beta", {})
-        # print(f"[eta_debug] per_beta keys: {list(per_beta.keys())}")
-        key1 = str(beta)
-        key2 = str(float(beta))
-        # print(f"[eta_debug] trying per_beta keys: '{key1}', '{key2}'")
-        if key1 in per_beta:
-            val = float(per_beta[key1])
-            # print(f"[eta_debug] HIT key1 -> eta={val}")
-            return val
-        if key2 in per_beta:
-            val = float(per_beta[key2])
-            # print(f"[eta_debug] HIT key2 -> eta={val}")
-            return val
+        key = _format_scalar_for_key(beta)
+        if key in per_beta:
+            return float(per_beta[key])
         print(f"[eta_debug] MISS -> fallback eta_default={default_eta}")
         return float(default_eta)
 
@@ -297,7 +291,7 @@ def tune_eta_for_exp(base_config: ExpConfig, tuning_cfg: Mapping[str, Any], gpu_
     metric_name   = tuning_cfg.get("metric", "train_loss")  # base name -> "<name>_hist"
     goal          = tuning_cfg.get("goal", "min")
     alphas        = base_config.alphas or [1.0]
-    betas         = base_config.betas
+    betas         = base_config.betas or [np.inf]
 
     partial_args  = (base_config, eta_grid, tuning_epochs, tuning_seeds[0], metric_name, goal)
 

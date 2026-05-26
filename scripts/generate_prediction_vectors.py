@@ -268,15 +268,13 @@ def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), sav
             D_dict[beta_key] = (D, labels)
             d_min, d_max = min(d_min, float(D.min())), max(d_max, float(D.max()))
 
-        im_for_cbar = None
         for bi, beta_key in enumerate(alpha_beta_keys):
             # get data
             D, labels = D_dict[beta_key]
             
             # set subplot
             ax = axes[mi, bi]
-            im = ax.imshow(D, vmin=d_min, vmax=d_max)
-            im_for_cbar = im
+            im = ax.imshow(D)
             ax.set_aspect("equal")
 
             if mi == n_metrics - 1:
@@ -298,7 +296,7 @@ def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), sav
                 ax.set_title(f"{beta_key}", fontsize=9)
 
         # one colorbar per metric row
-        fig.colorbar(im_for_cbar, ax=axes[mi, :].ravel().tolist(), location="right", shrink=0.8)
+        fig.colorbar(im, ax=ax, location="right", shrink=0.8)
 
     fig.savefig(out_png, dpi=200)
     plt.close(fig)

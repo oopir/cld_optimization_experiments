@@ -84,6 +84,7 @@ def make_lambda_like_params(model, init_type, lam_fc1, lam_fc2, lam_bi1=None, la
         else:
             raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field' or 'alpha'.")
 
+    # note for future: I think this isn't updated to deal with mean-field initialization
     if lam_bi1 is None or lam_bi2 is None:
         lam_bi1 = 1 / tanh_gain_sq
         lam_bi2 = 1 / lin_gain_sq
