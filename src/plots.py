@@ -72,11 +72,14 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         "train_loss": "training loss",
      }
     log_axes = {"feat_gram_lambda"}
+    # log_axes = {"feat_gram_lambda", "train_loss"}
     for k, ax in axes.items():
         ax.set_xlabel("epoch")
         ax.set_ylabel(ylabels[k])
         if k in log_axes:
             ax.set_yscale("log")
+    if "train_loss" in axes:
+        axes["train_loss"].set_ylim(top=2.5, bottom=1e-4)
 
     # ------------------------ actual plotting ------------------------ #
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
@@ -155,15 +158,24 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         # accuracy/loss (nonlinear vs linearized)
         mean, std, L = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
         x = base_x[:L]
-        _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.0)
+        _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.5)
         if use_linearized:
             mean, std, L = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
             x = base_x[:L]
-            _plot_band(axes["train_loss"], x, mean, std, label="linear", color=c, lin=True, lw=1.0)
+            _plot_band(axes["train_loss"], x, mean, std, label="linear", color=c, lin=True, lw=1.5)
 
     # define legends (needs to be done after plotting for choice of placement) and "draw"
-    ax1r.legend(loc="best", frameon=False, fontsize=9)
-    ax2r.legend(loc="best", frameon=False, fontsize=9)
+    # ax1r.legend(loc="best", frameon=False, fontsize=9)
+    # ax2r.legend(loc="best", frameon=False, fontsize=9)
+    handles, labels = ax4r.get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.05),
+        ncol=1,
+        frameon=False,
+    )
     fig.canvas.draw()
 
     # ------------------------ save all plots ------------------------- #

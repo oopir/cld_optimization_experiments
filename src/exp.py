@@ -161,20 +161,25 @@ def _resolve_eta(config: ExpConfig, alpha: float, beta: float) -> float:
 
     if mode == "per_beta":
         per_beta = table.get("per_beta", {})
-        # print(f"[eta_debug] per_beta keys: {list(per_beta.keys())}")
-        key1 = str(beta)
-        key2 = str(float(beta))
-        # print(f"[eta_debug] trying per_beta keys: '{key1}', '{key2}'")
-        if key1 in per_beta:
-            val = float(per_beta[key1])
-            # print(f"[eta_debug] HIT key1 -> eta={val}")
-            return val
-        if key2 in per_beta:
-            val = float(per_beta[key2])
-            # print(f"[eta_debug] HIT key2 -> eta={val}")
-            return val
+        key = _format_scalar_for_key(beta)
+        if key in per_beta:
+            return float(per_beta[key])
         print(f"[eta_debug] MISS -> fallback eta_default={default_eta}")
         return float(default_eta)
+        # # print(f"[eta_debug] per_beta keys: {list(per_beta.keys())}")
+        # key1 = str(beta)
+        # key2 = str(float(beta))
+        # # print(f"[eta_debug] trying per_beta keys: '{key1}', '{key2}'")
+        # if key1 in per_beta:
+        #     val = float(per_beta[key1])
+        #     # print(f"[eta_debug] HIT key1 -> eta={val}")
+        #     return val
+        # if key2 in per_beta:
+        #     val = float(per_beta[key2])
+        #     # print(f"[eta_debug] HIT key2 -> eta={val}")
+        #     return val
+        # print(f"[eta_debug] MISS -> fallback eta_default={default_eta}")
+        # return float(default_eta)
 
     if mode == "per_alpha_beta":
         per_ab = table.get("per_alpha_beta", {})
