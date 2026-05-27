@@ -38,7 +38,7 @@ class TwoLayerNet(nn.Module):
             raise ValueError(f"Unknown init='{init_type}'. Use 'standard' or 'mean-field' or 'alpha'.")
 
         # init biases
-        # Daniel: "biases are same as the weights (just have 1 as input)"
+        # "biases are same as the weights (just have 1 as input)"
         if with_bias:
             with torch.no_grad():
                 self.fc1.bias.normal_(mean=0.0, std=nn.init.calculate_gain(self.act))
