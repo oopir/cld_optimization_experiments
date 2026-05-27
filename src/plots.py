@@ -4,6 +4,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.transforms import Bbox
+import matplotlib.ticker as mticker
 
 mpl.rcParams.update(
     {
@@ -45,12 +46,18 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
     #     raise RuntimeError("plot_ex1_multiseed expects Jacobian data")
 
     # ------------------------- figure config ------------------------- #
-    fig  = plt.figure(figsize=(8, 13.0))
-    gs   = gridspec.GridSpec(4, 2, hspace=0.4, wspace=0.3)
-    ax1l, ax1r, ax2l, ax2r, ax3l, ax3r, ax4l, ax4r = (
-        plt.subplot(gs[0, 0]), plt.subplot(gs[0, 1]), plt.subplot(gs[1, 0]), plt.subplot(gs[1, 1]), 
-        plt.subplot(gs[2, 0]), plt.subplot(gs[2, 1]), plt.subplot(gs[3, 0]), plt.subplot(gs[3, 1]),
-    )
+    # ('axes' dict is used later, so don't push this section to the end)
+    fig = plt.figure(figsize=(8, 13.0))
+    gs = gridspec.GridSpec(4, 2, hspace=0.4, wspace=0.3)
+    ax1l = plt.subplot(gs[0, 0])
+    ax1r = plt.subplot(gs[0, 1])
+    ax2l = plt.subplot(gs[1, 0])
+    ax2r = plt.subplot(gs[1, 1])
+    ax3l = plt.subplot(gs[2, 0])
+    ax3r = plt.subplot(gs[2, 1])
+    ax4l = plt.subplot(gs[3, 0])
+    ax4r = plt.subplot(gs[3, 1])
+
     axes = {
         "jacobian_dist_l2": ax1l,
         "jacobian_dist_co": ax1r,
@@ -62,33 +69,19 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         "train_loss": ax4r,
     }
     ylabels = {
-        "jacobian_dist_l2": "distance (L2)",
-        "jacobian_dist_co": "distance (cosine)",
-        "nn_to_lin_dist_l2": "distance (L2)",
-        "nn_to_lin_dist_co": "distance (cosine)",
-        "feat_rel_dist": "distance (L2)",
-        "feat_cos_dist": "(cosine)",
-        "feat_gram_lambda": "λ_min",
-        "train_loss": "training loss",
+        "jacobian_dist_l2": "Distance (L2, normalized)",
+        "jacobian_dist_co": "Distance (cosine)",
+        "nn_to_lin_dist_l2": "Distance (L2, normalized)",
+        "nn_to_lin_dist_co": "Distance (cosine)",
+        "feat_rel_dist": "Distance (L2)",
+        "feat_cos_dist": "Distance (cosine)",
+        "feat_gram_lambda": r'$\lambda_{\min}$',
+        "train_loss": "Training loss",
      }
     log_axes = {"feat_gram_lambda"}
-    for k, ax in axes.items():
-        ax.set_xlabel("epoch")
-        ax.set_ylabel(ylabels[k])
-        if k in log_axes:
-            ax.set_yscale("log")
 
     # ------------------------ actual plotting ------------------------ #
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
-    # infer x from epoch_hist if present; else fall back to track_every
-    sample_beta_key = next(iter(results.keys()))
-    sample_seed_key = next(iter(results[sample_beta_key].keys()))
-    sample_metrics = results[sample_beta_key][sample_seed_key]
-
-    # if "epoch_hist" in sample_metrics:
-    #     base_x = np.asarray(sample_metrics["epoch_hist"])
-    # else:
-    #     base_x = np.arange(1, epochs + 1, track_every)
 
     for run_name, run_results_by_seed in results.items():
         c = next(colors)
@@ -155,38 +148,89 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         # accuracy/loss (nonlinear vs linearized)
         mean, std, L = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
         x = base_x[:L]
-        _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.0)
+        _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.5)
         if use_linearized:
             mean, std, L = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
             x = base_x[:L]
-            _plot_band(axes["train_loss"], x, mean, std, label="linear", color=c, lin=True, lw=1.0)
+            _plot_band(axes["train_loss"], x, mean, std, label="linear", color=c, lin=True, lw=1.5)
 
-    # define legends (needs to be done after plotting for choice of placement) and "draw"
-    ax1r.legend(loc="best", frameon=False, fontsize=9)
-    ax2r.legend(loc="best", frameon=False, fontsize=9)
+
+    for k, ax in axes.items():
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel(ylabels[k])
+        if k in log_axes:
+            ax.set_yscale("log")
+            scale = 1e4
+            fmt = mticker.FuncFormatter(lambda y, _: f"{y / scale:g}")
+            ax.yaxis.set_major_formatter(fmt)
+            ax.yaxis.set_minor_formatter(fmt)
+            ax.text(0.0, 1.02, "1e4", transform=ax.transAxes, ha="left", va="bottom")
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.8)
+
+    # handles, labels = axes["train_loss"].get_legend_handles_labels()
+    # fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.95), ncol=3, frameon=False,)
+    ax1r.legend(loc="best", frameon=False, fontsize=12)
+    ax2r.legend(loc="best", frameon=False, fontsize=12)
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
+    
     fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
 
-    # ------------------------ save all plots ------------------------- #
-    renderer  = fig.canvas.get_renderer()
-    bboxes_in = {name: ax.get_tightbbox(renderer).transformed(fig.dpi_scale_trans.inverted()) for name, ax in axes.items()}
-    max_w = max(bb.x1 - bb.x0 for bb in bboxes_in.values())
-    max_h = max(bb.y1 - bb.y0 for bb in bboxes_in.values())
-    pad_lr, pad_top, pad_bottom = 0.03, 0.05, 0.0
+    axes_list = [ax1l, ax1r, ax2l, ax2r, ax3l, ax3r, ax4l, ax4r]
+    legend = fig.legends[0] if fig.legends else None
 
-    # # save each subplot separately
-    # for name, ax in axes.items():
-    #     # make other subplots invisible (useful in case of overlapping content)
-    #     for a in axes.values():
-    #         a.set_visible(a is ax)
-    #     # save subplot
-    #     bb = bboxes_in[name]
-    #     bbox_equal = Bbox.from_extents(bb.x0 - pad_lr, bb.y0 - pad_bottom, bb.x0 + max_w + pad_lr, bb.y0 + max_h + pad_top)
-    #     fig.savefig(f"expr1_{name}.pdf", bbox_inches=bbox_equal)
+    # --- per-axis tight bboxes in inches ---
+    bboxes_in = {}
+    widths = []
+    heights = []
+    for name, ax in axes.items():
+        bb = ax.get_tightbbox(renderer)
+        bb_in = bb.transformed(fig.dpi_scale_trans.inverted())
+        bboxes_in[name] = bb_in
+        widths.append(bb_in.x1 - bb_in.x0)
+        heights.append(bb_in.y1 - bb_in.y0)
 
-    # restore full figure and save it
-    for a in axes.values():
+    max_w = max(widths)
+    max_h = max(heights)
+
+    pad_lr = 0.03   # horizontal padding (both sides)
+    pad_top = 0.05  # vertical padding at top
+    pad_bottom = 0.0  # keep bottom essentially tight
+
+    for name, ax in axes.items():
+        # show only this axis
+        for a in axes_list:
+            a.set_visible(a is ax)
+        # hide global legend
+        if legend is not None:
+            legend.set_visible(False)
+
+        bb = bboxes_in[name]
+        w = bb.x1 - bb.x0
+        h = bb.y1 - bb.y0
+
+        # bbox with:
+        # - same left boundary across all axes (bb.x0 - pad_lr)
+        # - same total width (max_w + 2*pad_lr)
+        # - bottom ~tight (bb.y0 - pad_bottom)
+        # - extra height added only at the top to reach max_h
+        bbox_equal = Bbox.from_extents(
+            bb.x0 - pad_lr,
+            bb.y0 - pad_bottom,
+            bb.x0 + max_w + pad_lr,
+            bb.y1 + (max_h - h) + pad_top,
+        )
+
+        fig.savefig(f"expr1_{name}.pdf", bbox_inches=bbox_equal)
+
+    # restore full figure (optional)
+    for a in axes_list:
         a.set_visible(True)
-    fig.savefig("expr1_full.pdf", bbox_inches="tight")
+    if legend is not None:
+        legend.set_visible(True)
+
+    fig.savefig(f"expr1_full.pdf", bbox_inches="tight")
 
 def plot_test_error_vs_alpha(results, output_path="alpha_test_error.pdf"):
     """
@@ -209,7 +253,7 @@ def plot_test_error_vs_alpha(results, output_path="alpha_test_error.pdf"):
         last_accs = []
         for metrics in run_results_by_seed.values():
             hist = metrics.get("test_acc_hist", None)
-            if hist:
+            if hist is not None and len(hist) > 0:
                 last_accs.append(hist[-1])
         if not last_accs:
             continue

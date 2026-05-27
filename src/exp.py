@@ -117,10 +117,12 @@ def label_from_alpha_beta(alpha=None, beta=None, n=None):
     label = ""
     if alpha is not None:
         label += f"α={alpha:.0e} "
-    if n is None:
-        label += f"β={beta}"
+    if beta == np.inf:
+        label += "inf"
+    elif n is None:
+        label += f"β={int(beta)}"
     else:
-        label += f"β={beta:.2e}"
+        label += f"β={int(beta//n)}n"
     return label
 
 def _load_eta_table(path: Path) -> Dict[str, Any]:
