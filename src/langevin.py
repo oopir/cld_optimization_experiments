@@ -11,10 +11,8 @@ def langevin_step(params, lam_tensors, beta, eta, regularization_scale=1.0, gen=
     for p, lam in zip(params, lam_tensors):
         if p.grad is None:
             continue
-        # gradient term
-        p.add_(p.grad, alpha=-eta)
-        # diagonal shrink term: -(eta/beta) * (lam ⊙ theta)
-        p.add_(regularization_scale * lam * p, alpha=-(eta / beta))
+        # gradient term + regularization
+        p.add_(p.grad + (regularization_scale / beta) * lam * p, alpha=-eta)
         # isotropic noise
         if gen:
             p.add_(torch.randn(p.shape, device=p.device, dtype=p.dtype, generator=gen) * noise_scale)
@@ -35,9 +33,7 @@ def joint_langevin_step(params1, lam_tensors1, params2, lam_tensors2, beta, eta,
             noise = torch.randn(p1.shape, device=p1.device, dtype=p1.dtype) * noise_scale
 
         for p, lam in ((p1, lam1), (p2, lam2)):
-            # gradient term
-            p.add_(p.grad, alpha=-eta)
-            # diagonal shrink term: -(eta/beta) * (lam ⊙ theta)
-            p.add_(regularization_scale * lam * p, alpha=-(eta / beta))
+            # gradient term + regularization
+            p.add_(p.grad + (regularization_scale / beta) * lam * p, alpha=-eta)
             # isotropic noise
             p.add_(noise)
