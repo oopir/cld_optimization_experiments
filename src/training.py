@@ -187,12 +187,7 @@ def train(
 
 
     with torch.no_grad():
-        if model.act == 'relu':
-            A0 = torch.relu(X_train @ model.fc1.weight.T)
-        elif model.act == 'tanh':
-            A0 = torch.tanh(X_train @ model.fc1.weight.T)
-        else:
-            raise ValueError(f"Tracking of feature distance does not support activation '{model.act}'.")
+        A0 = torch.tanh(X_train @ model.fc1.weight.T)
         A0_norm = A0.norm().item()
 
     metrics = _init_metrics(track_jacobian)
@@ -546,4 +541,3 @@ def train_multiseed(
                 results[run_seed] = metrics
 
     return results
-

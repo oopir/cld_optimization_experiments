@@ -5,7 +5,7 @@ import torch.nn as nn
 class TwoLayerNet(nn.Module):
     # don't rely on alpha's default value, as train_multiseed also has a 
     # default alpha value and it will always override the value in here...
-    def __init__(self, d_in, m, d_out=10, with_bias=False, init_type="standard", alpha=1, act="tanh"):
+    def __init__(self, d_in, m, d_out=10, with_bias=False, init_type="standard", alpha=1):
         super().__init__()
         self.d_in = d_in
         self.m = m
@@ -15,12 +15,8 @@ class TwoLayerNet(nn.Module):
         self.fc1 = nn.Linear(d_in, m, bias=with_bias)
         self.fc2 = nn.Linear(m, d_out, bias=with_bias)
 
-        if act not in ["tanh", "relu"]:
-            raise ValueError(f"Unknown act='{act}' Use 'tanh' or 'relu'.")
-        self.act = act
-
         # init weights
-        torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity=self.act)
+        torch.nn.init.kaiming_normal_(self.fc1.weight, mode="fan_in", nonlinearity="tanh")
         torch.nn.init.kaiming_normal_(self.fc2.weight, mode="fan_in", nonlinearity="linear")
         if init_type == "standard":
             pass
@@ -41,7 +37,7 @@ class TwoLayerNet(nn.Module):
         # "biases are same as the weights (just have 1 as input)"
         if with_bias:
             with torch.no_grad():
-                self.fc1.bias.normal_(mean=0.0, std=nn.init.calculate_gain(self.act))
+                self.fc1.bias.normal_(mean=0.0, std=nn.init.calculate_gain("tanh"))
                 self.fc2.bias.normal_(mean=0.0, std=nn.init.calculate_gain("linear"))
                 if init_type == "alpha":
                     self.fc1.bias.mul_(self.alpha)
@@ -50,12 +46,7 @@ class TwoLayerNet(nn.Module):
 
     def forward(self, x):
         x = self.fc1(x)
-        if self.act == "tanh":
-            x = torch.tanh(x)
-        elif self.act == "relu":
-            x = torch.relu(x)
-        else:
-            raise ValueError(f"Model's 'forward' does not support activation '{self.act}'.")
+        x = torch.tanh(x)
         x = self.fc2(x)
         if self.init_type == "alpha" and self.alpha != 0:
             x = x / self.alpha
@@ -68,7 +59,7 @@ def loss_fn(outputs, targets):
 # Diagonal lambda (per-parameter) construction
 # ---------------------------------------------------------------------------
 def make_lambda_like_params(model, init_type, lam_fc1, lam_fc2, lam_bi1=None, lam_bi2=None):
-    tanh_gain_sq = nn.init.calculate_gain(model.act)**2
+    tanh_gain_sq = nn.init.calculate_gain("tanh")**2
     lin_gain_sq  = nn.init.calculate_gain("linear")**2
 
     if lam_fc1 is None or lam_fc2 is None:
