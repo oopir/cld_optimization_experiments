@@ -3,7 +3,7 @@ from dataclasses import dataclass, field, fields, MISSING, is_dataclass
 from typing import Optional, List
 import torch
 
-from .metric_checkpoints import Exp1Config, save_exp1_checkpoint, load_exp1_checkpoint
+from . import metric_checkpoints  # noqa: F401; keep old checkpoint classes importable for torch.load
 
 @dataclass
 class ExpConfig:
@@ -89,9 +89,10 @@ def save_checkpoint(path, results, config: ExpConfig):
 
 def patch_loaded_config(config):
     """
-    Old checkpoints may unpickle as an instance of the current dataclass,
-    but without attributes that were added after the checkpoint was saved.
-    Fill those missing attributes from the current dataclass defaults.
+    Fill fields missing from dataclass checkpoint configs.
+
+    This runs after torch.load succeeds. It does not replace metric_checkpoints.py,
+    which is needed earlier if an old pickle refers to that module path.
     """
     if not is_dataclass(config):
         return config
@@ -121,6 +122,5 @@ def load_checkpoint(path):
 
     config = patch_loaded_config(payload["config"])
     return payload["results"], config
-
 
 

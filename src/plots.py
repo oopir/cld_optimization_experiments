@@ -37,6 +37,15 @@ def _plot_band(ax, x, mean, std, label, color, lin=False, lw=2.0):
     ax.fill_between(x, mean - std, mean + std, alpha=0.2, color=color, linewidth=0.0)
 
 def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
+    """
+    Plot one internally consistent experiment batch.
+
+    This assumes metric availability is homogeneous across the plotted runs/seeds:
+    if Jacobian plots are enabled, every plotted seed should have jacobian_dist_hist;
+    if use_linearized=True, every plotted seed should have nn_lin_param_dist_hist
+    and lin_train_loss_hist. Mixed old/new checkpoint sets are not handled gently.
+    Different history lengths from early stopping are okay; we truncate per run.
+    """
     # check if any run actually tracked jacobian distances
     has_jacobian_any = any(
         any("jacobian_dist_hist" in r for r in run_results_by_seed.values())

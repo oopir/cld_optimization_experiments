@@ -1,14 +1,17 @@
-# @@@@@@@@
-# this file is here for backward-compatibility - having thse outdated  
-# class/function names allows python's pickle module to work 
-# @@@@@@@@
+"""
+Compatibility shim for old torch checkpoints.
+
+Some old checkpoints pickle config objects as src.metric_checkpoints.Exp1Config.
+Keep that class importable so torch.load can deserialize them. New code should
+use ExpConfig/save_checkpoint/load_checkpoint from config.py.
+"""
 
 from dataclasses import dataclass, field
 from typing import Optional
-import torch
 
 @dataclass
 class Exp1Config:
+    """Old config shape kept for unpickling old checkpoints."""
     # parallelization
     seeds: list = field(default_factory=lambda: [0])
     device: str = "cpu"
@@ -41,6 +44,7 @@ class Exp1Config:
     collect_feature_stats: bool = True
 
     def train_kwargs(self):
+        # Legacy checkpoints should only use fields this old config actually knows about.
         return dict(
             seeds=self.seeds,
             device=self.device,
@@ -63,17 +67,3 @@ class Exp1Config:
             print_every=self.print_every,
             collect_feature_stats=self.collect_feature_stats, 
         )
-
-
-def save_exp1_checkpoint(path, results, config: Exp1Config):
-    payload = {"type": "exp1", "config": config, "results": results}
-    torch.save(payload, path)
-
-def load_exp1_checkpoint(path):
-    payload = torch.load(path, map_location="cpu", weights_only=False)
-
-    payload_type = payload.get("type", "exp1") # 2nd argument "tolerates" old ckpts w/o "type" field
-    if payload_type != "exp1":
-        raise ValueError(f"Unexpected checkpoint type: {payload_type}")
-
-    return payload["results"], payload["config"]
