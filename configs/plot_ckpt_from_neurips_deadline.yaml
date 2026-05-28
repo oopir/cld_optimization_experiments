@@ -1,0 +1,25 @@
+experiment:
+    seeds: [0, 1, 2, 3, 4]
+    n: 10
+    random_labels: false
+    betas: [100, 500, 1000, .inf]
+    epochs: 4000000
+    eta: 1.0e-5
+    m: 159056
+    dataset: digits
+    use_linearized: true
+    same_noise: false
+    track_jacobian: true
+    jac_probe_size: 10
+    device: cuda
+    track_every: 30000
+    print_every: 1000000
+  
+run:
+    ckpt_dir: "~/"
+    save_ckpt: false
+    load_ckpt: true
+    load_ckpt_name: "neurips_ckpt.pt"
+    resume_from_ckpt: false
+    new_total_epochs: 0
+    config_overrides: []

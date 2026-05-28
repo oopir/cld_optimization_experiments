@@ -1,5 +1,5 @@
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, MISSING, is_dataclass
 from typing import Optional, List
 import torch
 
@@ -85,6 +85,30 @@ def save_checkpoint(path, results, config: ExpConfig):
     payload = {"type": "exp1", "config": config, "results": results}
     torch.save(payload, path)
 
+def patch_loaded_config(config):
+    """
+    Old checkpoints may unpickle as an instance of the current dataclass,
+    but without attributes that were added after the checkpoint was saved.
+    Fill those missing attributes from the current dataclass defaults.
+    """
+    if not is_dataclass(config):
+        return config
+
+    for f in fields(config):
+        if hasattr(config, f.name):
+            continue
+
+        if f.default is not MISSING:
+            setattr(config, f.name, f.default)
+        elif f.default_factory is not MISSING:
+            setattr(config, f.name, f.default_factory())
+        else:
+            raise AttributeError(
+                f"Loaded checkpoint config is missing required field {f.name!r} "
+                f"and no default exists."
+            )
+
+    return config
 
 def load_checkpoint(path):
     payload = torch.load(path, map_location="cpu", weights_only=False)
@@ -93,4 +117,8 @@ def load_checkpoint(path):
     if payload_type != "exp1":
         raise ValueError(f"Unexpected checkpoint type: {payload_type}")
 
-    return payload["results"], payload["config"]
+    config = patch_loaded_config(payload["config"])
+    return payload["results"], config
+
+
+
