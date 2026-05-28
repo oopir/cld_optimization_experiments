@@ -149,10 +149,11 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         mean, std, L = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
         x = base_x[:L]
         _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.5)
-        if use_linearized:
-            mean, std, L = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
-            x = base_x[:L]
-            _plot_band(axes["train_loss"], x, mean, std, label="linear", color=c, lin=True, lw=1.5)
+        # currently we don't show linearized model loss in any figure
+        # if use_linearized:
+        #     mean, std, L = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
+        #     x = base_x[:L]
+        #     _plot_band(axes["train_loss"], x, mean, std, label="linear", color=c, lin=True, lw=1.5)
 
 
     for k, ax in axes.items():
