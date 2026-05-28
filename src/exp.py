@@ -65,6 +65,7 @@ def _apply_config_overrides(base: ExpConfig, override_src: ExpConfig, override_k
             "eta_table_path",
             "regularization_scale", 
             "same_noise", 
+            "noise_free_after_epoch",
             "early_stop_metric",
             "early_stop_goal",
             "early_stop_value",
