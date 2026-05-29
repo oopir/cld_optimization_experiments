@@ -1,6 +1,7 @@
 import argparse
 import sys
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -30,6 +31,22 @@ from src.config import ExpConfig, load_checkpoint
 from src.model import TwoLayerNet
 from src.linearized import linearized_forward
 from src.utils import select_idle_gpus_for_experiment
+
+ALPHA_RE = re.compile(r"(?:^|\s)α=([^\s]+)")
+
+
+def alpha_from_label(label, config: ExpConfig) -> float:
+    """Return the alpha needed to reconstruct models saved under one result label."""
+    match = ALPHA_RE.search(str(label))
+    if match is not None:
+        return float(match.group(1))
+
+    alphas = list(getattr(config, "alphas", []) or [])
+    if len(alphas) == 1:
+        return float(alphas[0])
+    if len(alphas) > 1:
+        raise ValueError(f"Could not infer alpha from result label {label!r}.")
+    return 1.0
 
 
 def _get_unused_digits(config: ExpConfig, num_points: int = 100, device: str = "cpu", sample_seed: int = 0):
@@ -139,6 +156,7 @@ def compute_oos_predictions(
 
     all_preds = {}
     for k, by_seed in results.items():
+        alpha = alpha_from_label(k, config)
         preds_of_k = {}
         for seed, metrics in by_seed.items():
             if "lin_params_state" not in metrics:
@@ -154,7 +172,7 @@ def compute_oos_predictions(
             m = fc1_w.shape[0]
             d_out = fc2_w.shape[0]
 
-            nn_model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, init_type=config.init_type).to(device)
+            nn_model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, init_type=config.init_type, alpha=alpha).to(device)
             nn_model.load_state_dict(model_state)
             nn_model.eval()
             with torch.no_grad():
@@ -300,8 +318,13 @@ def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), sav
 
     out_png = os.path.join(ckpt_fig_dir, "all_dist_heatmaps.png")
 
-    fig, axes = plt.subplots(n_metrics, n_betas, figsize=(3*n_betas, 3*n_metrics), constrained_layout=True)
-    axes = np.array(axes, ndmin=2)
+    fig, axes = plt.subplots(
+        n_metrics,
+        n_betas,
+        figsize=(3*n_betas, 3*n_metrics),
+        constrained_layout=True,
+        squeeze=False,
+    )
 
     for mi, metric in enumerate(metrics):
         # precompute all matrices for this metric to share color scale
@@ -318,7 +341,7 @@ def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), sav
             
             # set subplot
             ax = axes[mi, bi]
-            im = ax.imshow(D)
+            im = ax.imshow(D, vmin=d_min, vmax=d_max)
             ax.set_aspect("equal")
 
             if mi == n_metrics - 1:
@@ -340,7 +363,7 @@ def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), sav
                 ax.set_title(f"{beta_key}", fontsize=9)
 
         # one colorbar per metric row
-        fig.colorbar(im, ax=ax, location="right", shrink=0.8)
+        fig.colorbar(im, ax=axes[mi, :], location="right", shrink=0.8)
 
     fig.savefig(out_png, dpi=200)
     plt.close(fig)
