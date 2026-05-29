@@ -70,8 +70,8 @@ if __name__ == "__main__":
         (4_000_000, 6_000_000, 30_000),
     ]
 
-    ckpt_in  = "/home/ofirg/cld_checkpoints/expr1/exp1_digits_20260127_220538.pt"
-    ckpt_out = "/home/ofirg/cld_checkpoints/expr1/exp1_digits_20260127_220538_fixed.pt"
+    ckpt_in  = "~/cld_checkpoints/expr1/exp1_digits_20260127_220538.pt"
+    ckpt_out = "~/cld_checkpoints/expr1/exp1_digits_20260127_220538_fixed.pt"
 
     retrofit_checkpoint(ckpt_in, ckpt_out, SEGMENTS_6E6)
 
