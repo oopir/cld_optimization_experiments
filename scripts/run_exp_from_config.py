@@ -6,10 +6,16 @@ from pathlib import Path
 import yaml
 from datetime import datetime
 
-ROOT = Path.cwd()
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-os.environ["PYTHONPATH"] = str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if Path.cwd().resolve() != REPO_ROOT:
+    raise SystemExit(
+        "Run this script from the repository root so relative paths, configs, "
+        f"checkpoints, and imports resolve consistently:\n  cd {REPO_ROOT}\n"
+        "  python scripts/run_exp_from_config.py --config <path>"
+    )
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+os.environ["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 from src.exp import run_exp, build_from_config_mapping, tune_eta_for_exp
 from src.plots import plot_ex1_multiseed, plot_test_error_vs_alpha

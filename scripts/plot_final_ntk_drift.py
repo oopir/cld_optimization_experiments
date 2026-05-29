@@ -2,18 +2,25 @@
 import argparse, math, os, sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if Path.cwd().resolve() != REPO_ROOT:
+    raise SystemExit(
+        "Run this script from the repository root so relative paths and imports "
+        f"resolve consistently:\n  cd {REPO_ROOT}\n  python scripts/plot_final_ntk_drift.py ..."
+    )
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+os.environ["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-
-ROOT = Path.cwd()
-sys.path.insert(0, str(ROOT))
-os.environ["PYTHONPATH"] = str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 from src.config import load_checkpoint
 from src.data import load_digits_data, load_mnist_data
 from src.linearized import compute_param_jacobians
 from src.model import TwoLayerNet
+from src.utils import select_idle_gpus_for_experiment
 
 
 def fnum(x):
@@ -162,16 +169,30 @@ def plot_pdf(path, betas, grouped, n, kind):
     plt.close(fig)
 
 
+def resolve_device(device_mode):
+    """Return a torch device string from a user-facing cpu/gpu mode."""
+    if device_mode == "cpu":
+        return "cpu"
+
+    gpu_ids = select_idle_gpus_for_experiment(device="cuda", util_threshold=1)
+    if gpu_ids == [None]:
+        print("CUDA is unavailable; falling back to CPU.", file=sys.stderr)
+        return "cpu"
+    return f"cuda:{gpu_ids[0]}"
+
+
 def main():
     """Parse arguments, compute drifts, and save PDF figure(s)."""
     p = argparse.ArgumentParser()
     p.add_argument("checkpoint")
     p.add_argument("--outdir", default=None)
-    p.add_argument("--device", default="cuda:0")
+    p.add_argument("--device", choices=["gpu", "cpu"], default="gpu")
     p.add_argument("--probe-size", type=int, default=None)
     p.add_argument("--alpha", type=float, default=None)
     p.add_argument("--distance", choices=["l2", "cos", "both"], default="cos")
     args = p.parse_args()
+    device = resolve_device(args.device)
+    print(f"using device: {device}")
 
     results, config = load_checkpoint(args.checkpoint)
     has_alpha_sweep = bool(getattr(config, "alphas", []) or [])
@@ -186,7 +207,7 @@ def main():
             raise KeyError(f"Missing result label {label!r}. Available: {list(results)}")
 
         rows = [
-            seed_row(metrics, config, seed, alpha, args.device, args.probe_size)
+            seed_row(metrics, config, seed, alpha, device, args.probe_size)
             for seed, metrics in results[label].items()
         ]
         grouped.append(rows)

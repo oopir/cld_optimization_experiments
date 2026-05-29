@@ -1,15 +1,18 @@
+import argparse
 import sys
 import os
 from pathlib import Path
-from datetime import datetime
 from typing import Optional
 
-ROOT = Path.cwd()
-
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-os.environ["PYTHONPATH"] = str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if Path.cwd().resolve() != REPO_ROOT:
+    raise SystemExit(
+        "Run this script from the repository root so relative paths and imports "
+        f"resolve consistently:\n  cd {REPO_ROOT}\n  python scripts/generate_prediction_vectors.py ..."
+    )
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+os.environ["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 import numpy as np
 import torch
@@ -25,10 +28,11 @@ warnings.filterwarnings(
 
 from src.config import ExpConfig, load_checkpoint
 from src.model import TwoLayerNet
-from src.linearized import init_linearization, linearized_forward
+from src.linearized import linearized_forward
+from src.utils import select_idle_gpus_for_experiment
 
 
-def _ex1_get_unused_digits(config: ExpConfig, num_points: int = 100, device: str = "cpu"):
+def _get_unused_digits(config: ExpConfig, num_points: int = 100, device: str = "cpu", sample_seed: int = 0):
     """
     construct `num_points` digits points that were not used in *any training set* of any run 
     in the given ExpConfig. points that appear in a test set are treated as unused.
@@ -55,14 +59,20 @@ def _ex1_get_unused_digits(config: ExpConfig, num_points: int = 100, device: str
     # choose `num_points` unused points at random
     if unused_idx.shape[0] < num_points:
         raise ValueError(f"Requested {num_points} unused points, but only {unused_idx.shape[0]} are available.")
-    rng = np.random.default_rng(0)  # this way, the same 100 points are chosen on each run of the script 
+    rng = np.random.default_rng(sample_seed)
     chosen_idx = rng.choice(unused_idx, size=num_points, replace=False)
     X_sel = torch.tensor(X[chosen_idx], device=device)
     y_sel = torch.tensor(y[chosen_idx], device=device)
     return chosen_idx, X_sel, y_sel
 
 
-def _get_unused_mnist(config: ExpConfig, num_points: int = 100, device: str = "cpu", reserve_last=1000):
+def _get_unused_mnist(
+    config: ExpConfig,
+    num_points: int = 100,
+    device: str = "cpu",
+    reserve_last=1000,
+    sample_seed: int = 0,
+):
     # download data from web
     mnist = fetch_openml("mnist_784", version=1, as_frame=False)
     X = mnist["data"].astype(np.float32)
@@ -77,7 +87,7 @@ def _get_unused_mnist(config: ExpConfig, num_points: int = 100, device: str = "c
     # choose `num_points` unused points from the last `reserved_last` datapoints 
     n_total  = X.shape[0]
     last_idx = np.arange(n_total - reserve_last, n_total)
-    rng = np.random.default_rng(0)  # this way, the same 100 points are chosen on each run of the script 
+    rng = np.random.default_rng(sample_seed)
     chosen_idx = rng.choice(last_idx, size=num_points, replace=False)
     X_sel = torch.tensor(X[chosen_idx], device=device)
     y_sel = torch.tensor(y[chosen_idx], device=device)
@@ -85,21 +95,47 @@ def _get_unused_mnist(config: ExpConfig, num_points: int = 100, device: str = "c
     return chosen_idx, X_sel, y_sel
 
 
-def compute_ex1_oos_predictions(
+def get_oos_points(
+    config: ExpConfig,
+    num_points: int,
+    device: str,
+    sample_seed: int,
+):
+    dataset = getattr(config, "dataset", "digits")
+    if dataset == "digits":
+        return _get_unused_digits(config, num_points=num_points, device=device, sample_seed=sample_seed)
+    if dataset == "mnist":
+        return _get_unused_mnist(
+            config,
+            num_points=num_points,
+            device=device,
+            reserve_last=getattr(config, "reserve_last", 1000),
+            sample_seed=sample_seed,
+        )
+    raise ValueError(f"Unsupported dataset={dataset!r}.")
+
+
+def compute_oos_predictions(
     ckpt_path: str,
     num_points: int = 100,
     device: str = "cpu",
     save: bool = True,
     save_dir: Optional[str] = None,
+    sample_seed: int = 0,
 ):
     """
     For every (nn_model, linearized_model) pair in an Exp1 checkpoint:
-      - compute predictions on 100 digits points unseen in any run,
+      - compute predictions on out-of-sample points,
       - flatten outputs into vectors,
       - optionally save everything to disk.
     """
     results, config = load_checkpoint(ckpt_path)
-    idx_oos, X_oos, y_oos = _get_unused_mnist(config, num_points=num_points, device=device)
+    idx_oos, X_oos, y_oos = get_oos_points(
+        config,
+        num_points=num_points,
+        device=device,
+        sample_seed=sample_seed,
+    )
 
     all_preds = {}
     for k, by_seed in results.items():
@@ -146,12 +182,20 @@ def compute_ex1_oos_predictions(
     if save:
         if save_dir is None:
             save_dir = os.path.dirname(ckpt_path)
+        os.makedirs(save_dir, exist_ok=True)
         ckpt_base = os.path.basename(ckpt_path)
         ckpt_stem, _ = os.path.splitext(ckpt_base)
         out_path = os.path.join(save_dir, f"{ckpt_stem}_oos_preds.pt")
         torch.save(payload, out_path)
         print(f"Saved out-of-sample predictions to {out_path}")
 
+    return payload
+
+
+def load_prediction_payload(predictions_path: str):
+    payload = torch.load(predictions_path, map_location="cpu", weights_only=False)
+    if not isinstance(payload, dict) or "predictions" not in payload:
+        raise ValueError(f"{predictions_path} is not a prediction payload saved by this script.")
     return payload
 
 
@@ -201,7 +245,7 @@ def compute_beta_distance_matrix(payload, beta_key, metric: str = "l2"):
     return D, labels
 
 
-def plot_beta_distance_heatmap(D, labels, ckpt_path, beta_key, save_dir: Optional[str] = None):
+def plot_beta_distance_heatmap(D, labels, ckpt_path, beta_key, metric, save_dir: Optional[str] = None):
     n_vec = D.shape[0]
 
     # root directory to place the checkpoint-specific folder in
@@ -216,7 +260,7 @@ def plot_beta_distance_heatmap(D, labels, ckpt_path, beta_key, save_dir: Optiona
     ckpt_fig_dir = os.path.join(save_dir, ckpt_stem)
     os.makedirs(ckpt_fig_dir, exist_ok=True)
 
-    out_png = os.path.join(ckpt_fig_dir, f"{beta_tag}_dist_heatmap.png")
+    out_png = os.path.join(ckpt_fig_dir, f"{beta_tag}_{metric}_dist_heatmap.png")
 
     fig_width = 0.6 * n_vec + 2.0
     fig_height = 0.6 * n_vec + 2.0
@@ -229,7 +273,7 @@ def plot_beta_distance_heatmap(D, labels, ckpt_path, beta_key, save_dir: Optiona
     ax.set_xticklabels(labels, rotation=90, fontsize=8)
     ax.set_yticklabels(labels, fontsize=8)
 
-    ax.set_title(f"Prediction distances for {beta_key}")
+    ax.set_title(f"{metric} prediction distances for {beta_key}")
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     fig.tight_layout()
@@ -304,20 +348,78 @@ def plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), sav
     print(f"Saved all distance heatmaps to {out_png}")
 
 
-def main():
-    ckpt_dir = "/home/ofirg/cld_checkpoints/expr1"
-    ckpt_name = "_mnist_20260215_152522.pt"
-    ckpt_path = os.path.join(ckpt_dir , ckpt_name)
-    payload = compute_ex1_oos_predictions(
-        ckpt_path=ckpt_path,
-        device="cuda",
-        save=False,
-        save_dir=ckpt_dir,
+def resolve_device(device_mode):
+    """Return a torch device string from a user-facing cpu/gpu mode."""
+    if device_mode == "cpu":
+        return "cpu"
+
+    gpu_ids = select_idle_gpus_for_experiment(device="cuda", util_threshold=1)
+    if gpu_ids == [None]:
+        print("CUDA is unavailable; falling back to CPU.", file=sys.stderr)
+        return "cpu"
+    return f"cuda:{gpu_ids[0]}"
+
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Generate out-of-sample prediction vectors and distance heatmaps."
     )
-    # for beta_key in payload["predictions"].keys():
-    #     D, labels = compute_beta_distance_matrix(payload, beta_key, metric="cosine")
-    #     plot_beta_distance_heatmap(D, labels, payload["ckpt_path"], beta_key, save_dir=ckpt_dir)
-    plot_all_distance_heatmaps(payload, ckpt_path, metrics=("l2", "cosine"), save_dir=ckpt_dir)
+    p.add_argument("checkpoint", help="Checkpoint to process.")
+    p.add_argument("--outdir", default=None, help="Output directory. Defaults to the checkpoint directory.")
+    p.add_argument("--device", choices=["gpu", "cpu"], default="gpu")
+    p.add_argument("--num-points", type=int, default=100)
+    p.add_argument("--sample-seed", type=int, default=0)
+    p.add_argument("--metrics", nargs="+", choices=["l2", "cosine"], default=["l2", "cosine"])
+    p.add_argument(
+        "--save-predictions",
+        action="store_true",
+        help="Save the generated prediction payload next to the figures.",
+    )
+    p.add_argument(
+        "--predictions",
+        default=None,
+        help="Existing prediction payload to plot instead of recomputing predictions.",
+    )
+    p.add_argument("--no-plots", action="store_true", help="Skip heatmap generation.")
+    p.add_argument(
+        "--per-label-plots",
+        action="store_true",
+        help="Also save one heatmap per beta/alpha-beta label and metric.",
+    )
+    return p.parse_args()
+
+
+def main():
+    args = parse_args()
+    ckpt_path = str(Path(args.checkpoint).expanduser().resolve())
+    save_dir = str(Path(args.outdir).expanduser().resolve()) if args.outdir is not None else os.path.dirname(ckpt_path)
+    os.makedirs(save_dir, exist_ok=True)
+    device = resolve_device(args.device)
+    print(f"using device: {device}")
+
+    if args.predictions is None:
+        payload = compute_oos_predictions(
+            ckpt_path=ckpt_path,
+            num_points=args.num_points,
+            device=device,
+            save=args.save_predictions,
+            save_dir=save_dir,
+            sample_seed=args.sample_seed,
+        )
+    else:
+        payload = load_prediction_payload(str(Path(args.predictions).expanduser().resolve()))
+        ckpt_path = payload.get("ckpt_path", ckpt_path)
+
+    if args.no_plots:
+        return
+
+    metrics = tuple(args.metrics)
+    if args.per_label_plots:
+        for beta_key in payload["predictions"].keys():
+            for metric in metrics:
+                D, labels = compute_beta_distance_matrix(payload, beta_key, metric=metric)
+                plot_beta_distance_heatmap(D, labels, ckpt_path, beta_key, metric, save_dir=save_dir)
+    plot_all_distance_heatmaps(payload, ckpt_path, metrics=metrics, save_dir=save_dir)
 
 
 if __name__ == "__main__":
