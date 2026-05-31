@@ -180,8 +180,7 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
 
     # handles, labels = axes["train_loss"].get_legend_handles_labels()
     # fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.95), ncol=3, frameon=False,)
-    ax1r.legend(loc="best", frameon=False, fontsize=12)
-    ax2r.legend(loc="best", frameon=False, fontsize=12)
+    ax4r.legend(loc="best", frameon=False, fontsize=12)
     plt.tight_layout(rect=[0, 0, 1, 0.93])
     
     fig.canvas.draw()
