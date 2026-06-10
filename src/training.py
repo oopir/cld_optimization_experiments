@@ -13,7 +13,6 @@ from .langevin import langevin_step, joint_langevin_step
 from .linearized import (
     init_linearization,
     linearized_forward,
-    compute_param_jacobians
 )
 from .stats import (
     BASE_METRIC_NAMES,
@@ -21,8 +20,7 @@ from .stats import (
     get_stats,
     get_linear_stats,
     get_nn_lin_param_dist,
-    compute_dataset_ntk_drift,
-    compute_dist_bound_under_GF,
+    compute_dataset_jac_drift,
     estimate_loss_floor
 )
 
@@ -179,12 +177,7 @@ def _init_jacobian_track_vars(d, d_out, m, init_type, alpha, device, model, X_tr
     """Prepare an initialization copy for full-dataset NTK/Jacobian drift tracking."""
     model_at_init = TwoLayerNet(d_in=d, m=m, d_out=d_out, init_type=init_type, alpha=alpha).to(device)
     model_at_init.load_state_dict(model.state_dict())
-
-    X_probe = X_train[:probe_bs].to(device)
-    jac_init = compute_param_jacobians(model, X_probe)
-    jac_init_norm_sq = sum(float(ji.pow(2).sum().item()) for ji in jac_init)
-
-    return model_at_init, X_probe, jac_init, jac_init_norm_sq
+    return model_at_init
 
 def _init_metrics(track_jacobian):
     """Create metric history lists using the public checkpoint key names."""
@@ -193,7 +186,6 @@ def _init_metrics(track_jacobian):
         metrics["jacobian_dist_hist"] = []
     for name in LIN_METRIC_NAMES:
         metrics[f"{name}_hist"] = []
-    metrics["nn_to_lin_hist"] = []
     metrics["nn_lin_param_dist_hist"] = []
     metrics["epoch_hist"] = []
     return metrics
@@ -298,8 +290,6 @@ def _record_linear_metrics(metrics, base, lin, data):
     for name in LIN_METRIC_NAMES:
         metrics[f"{name}_hist"].append(lin_stats[name])
 
-    nn_to_lin_dist = torch.sqrt(sum((p - q).pow(2).sum() for p, q in zip(base.params, lin.params))).item()
-    metrics["nn_to_lin_hist"].append(nn_to_lin_dist)
     metrics["nn_lin_param_dist_hist"].append(get_nn_lin_param_dist(base.params, lin.params, normalize_by=base.param_norm0))
     return lin_stats
 
@@ -335,23 +325,18 @@ def _record_epoch_metrics(
         metrics[f"{name}_hist"].append(stats[name])
 
     if track_jacobian:
-        jacobian_dist = compute_dataset_ntk_drift(
-            base.model,
-            model_at_init,
-            data["X_train"],
-            batch_size=jac_probe_size,
-        )
+        jacobian_dist = \
+            compute_dataset_jac_drift(base.model, model_at_init, data["X_train"], jac_probe_size)
         metrics["jacobian_dist_hist"].append(jacobian_dist)
 
     lin_stats = _record_linear_metrics(metrics, base, lin, data) if lin is not None else {}
     return stats, lin_stats
 
-def _finalize_metrics(metrics, base, lin, data, beta, m, device, sup_sigma_max_v, collect_feature_stats, init_state_for_metrics):
+def _finalize_metrics(metrics, base, lin, data, beta, m, device, collect_feature_stats, init_state_for_metrics):
     """Attach final bounds, RNG state, and checkpoint payload tensors."""
     metrics["rng_state"] = _save_rng_state(device)
 
     if collect_feature_stats:
-        metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(data["X_train"], base.W0, sup_sigma_max_v)
         metrics["loss_floor"] = estimate_loss_floor(data["X_train"], beta, m=m, device=device)
     else:
         metrics["param_dist_upper_bound"] = float("nan")
@@ -397,7 +382,7 @@ def train(data, args, resume_state=None):
 
     model_at_init = None
     if args.track_jacobian:
-        model_at_init, _, _, _ = _init_jacobian_track_vars(
+        model_at_init = _init_jacobian_track_vars(
             data["d_in"], 
             data["d_out"], 
             args.m, 
@@ -435,7 +420,6 @@ def train(data, args, resume_state=None):
         data,
         args.collect_feature_stats,
     )
-    sup_sigma_max_v = stats["sigma_max_v"]
 
     last_epoch = args.epoch_offset
     for epoch in range(args.epoch_offset + 1, args.epochs + 1):
@@ -455,7 +439,6 @@ def train(data, args, resume_state=None):
                 args.jac_probe_size,
                 epoch,
             )
-            sup_sigma_max_v = max(sup_sigma_max_v, stats["sigma_max_v"])
 
             if args.print_every == 1 or epoch % args.print_every == 1:
                 _print_epoch_progress(args.device, epoch, stats)
@@ -502,7 +485,6 @@ def train(data, args, resume_state=None):
         args.beta,
         args.m,
         args.device,
-        sup_sigma_max_v,
         args.collect_feature_stats,
         init_state_for_metrics,
     )
