@@ -72,6 +72,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip plotting after run",
     )
+    p.add_argument(
+        "--plot-output-dir",
+        type=Path,
+        default=None,
+        help="Override run.plot_output_dir for generated plot files",
+    )
     return p.parse_args()
 
 
@@ -92,6 +98,8 @@ def main():
         run_opts.resume_from_ckpt = True
     if args.save_ckpt:
         run_opts.save_ckpt = True
+    if args.plot_output_dir is not None:
+        run_opts.plot_output_dir = args.plot_output_dir
 
     gpu_ids = select_idle_gpus_for_experiment(device=exp_config.device)
 
@@ -101,9 +109,15 @@ def main():
     else:
         results, final_config = run_exp(config=exp_config, run_opts=run_opts, gpu_ids=gpu_ids)
         if not args.no_plot:
-            plot_ex1_multiseed(results, final_config.epochs, final_config.track_every, final_config.use_linearized)
+            plot_ex1_multiseed(
+                results,
+                final_config.epochs,
+                final_config.track_every,
+                final_config.use_linearized,
+                plot_output_dir=run_opts.plot_output_dir,
+            )
             if len(final_config.alphas) > 1:
-                plot_test_error_vs_alpha(results)
+                plot_test_error_vs_alpha(results, output_path=run_opts.plot_output_dir / "alpha_test_error.pdf")
 
 
 if __name__ == "__main__":

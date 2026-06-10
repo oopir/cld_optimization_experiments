@@ -14,7 +14,7 @@ BASE_METRIC_NAMES = [
     "param_norm_fc1",
     "param_norm_fc2",
     "feat_rel_dist",
-    "feat_cos_dist",  
+    "feat_cos_dist",
     "feat_gram_lambda",
 ]
 LIN_METRIC_NAMES = [
@@ -27,72 +27,80 @@ LIN_METRIC_NAMES = [
     "lin_param_norm_fc2",
 ]
 
+
+def _param_l2(params):
+    """Compute the joint L2 norm for a list of parameter tensors."""
+    return torch.sqrt(sum(p.pow(2).sum() for p in params)).item()
+
+def _param_dist(params, params0):
+    """Compute parameter displacement from the matching initialization tensors."""
+    return torch.sqrt(sum((p - p0).pow(2).sum() for p, p0 in zip(params, params0))).item()
+
+def _classification_metrics(model, X, y, loss_targets=None, batch_size=1024):
+    """Evaluate accuracy and optional MSE loss in batches for NN metrics."""
+    n = X.size(0)
+    total_correct = 0
+    total_loss = 0.0
+
+    for start in range(0, n, batch_size):
+        end = start + batch_size
+        xb = X[start:end]
+        out = model(xb)
+        total_correct += (out.argmax(dim=1) == y[start:end]).sum().item()
+
+        if loss_targets is not None:
+            target = loss_targets[start:end]
+            total_loss += loss_fn(out, target).item() * len(xb)
+
+    acc = total_correct / n
+    loss = total_loss / n if loss_targets is not None else None
+    return acc, loss
+
+def _feature_stats(model, X_train, A0, A0_norm):
+    """Compute hidden-feature drift metrics used by the experiment plots and bounds."""
+    sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
+
+    A_t = torch.tanh(model.fc1(X_train))
+    feat_rel_dist = (A_t - A0).norm().item() / (A0_norm + 1e-12)
+
+    cos_sim = F.cosine_similarity(A_t.view(-1), A0.view(-1), dim=0).item()
+    feat_cos_dist = 1.0 - cos_sim
+
+    A_Gram = A_t @ A_t.T
+    A_Gram = 0.5 * (A_Gram + A_Gram.T)
+    try:
+        feat_gram_lambda = torch.linalg.eigvalsh(A_Gram)[0].item()
+    except Exception:
+        print("Numerical instability occurred when computing lambda_min of feature matrix. Defaulting to nan.")
+        feat_gram_lambda = float("nan")
+
+    return sigma_max_v, feat_rel_dist, feat_cos_dist, feat_gram_lambda
+
 @torch.no_grad()
 def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats):
+    """Compute base neural-network metrics while preserving existing metric keys."""
     X_train = data["X_train"]
-    X_test  = data["X_test"]
+    X_test = data["X_test"]
     y_train = data["y_train"]
-    y_test  = data["y_test"]
-    if "y_train_one_hot" in data:
-        y_train_one_hot = data["y_train_one_hot"]
-    else:
-        y_train_one_hot = None
-    batch_size = 1024
-    
-    # ---- train metrics ----
-    N_train = X_train.size(0)
-    total_correct_train = 0
-    total_loss_train = 0.0
-    for start in range(0, N_train, batch_size):
-        end = start + batch_size
-        xb  = X_train[start:end]
-        yb  = y_train[start:end] if y_train_one_hot is None else y_train_one_hot[start:end]
-        out = model(xb)
-        total_correct_train += (out.argmax(dim=1) == y_train[start:end]).sum().item()
-        total_loss_train += loss_fn(out, yb).item() * len(xb)
+    y_test = data["y_test"]
 
-    train_acc = total_correct_train / N_train
-    train_loss = total_loss_train / N_train
+    # MSE classification runs use one-hot targets; regression-style runs can omit them.
+    train_targets = data.get("y_train_one_hot", y_train)
+    train_acc, train_loss = _classification_metrics(model, X_train, y_train, train_targets)
+    test_acc, _ = _classification_metrics(model, X_test, y_test)
 
-    # ---- test metrics ----
-    N_test = X_test.size(0)
-    total_correct_test = 0
-    for start in range(0, N_test, batch_size):
-        end = start + batch_size
-        xb  = X_test[start:end]
-        out = model(xb)
-        total_correct_test += (out.argmax(dim=1) == y_test[start:end]).sum().item()
-    test_acc = total_correct_test / N_test
-    
-    param_dist = torch.sqrt(sum((p-p0).pow(2).sum() for p, p0 in zip(params, params0))).item()
-    param_norm = torch.sqrt(sum(p.pow(2).sum() for p in params)).item()
+    param_dist = _param_dist(params, params0)
+    param_norm = _param_l2(params)
     fc1_norm = torch.sqrt(params[0].pow(2).sum()).item()
     fc2_norm = torch.sqrt(params[1].pow(2).sum()).item()
 
     if collect_feature_stats:
-        sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
+        sigma_max_v, feat_rel_dist, feat_cos_dist, feat_gram_lambda = _feature_stats(model, X_train, A0, A0_norm)
     else:
         sigma_max_v = float("nan")
-
-    if collect_feature_stats:
-        A_t = torch.tanh(model.fc1(X_train))
-        dist = (A_t - A0).norm().item()
-        feat_rel_dist = dist / (A0_norm + 1e-12)
-
-        v_t = A_t.view(-1)
-        v0 = A0.view(-1)
-        cos_sim = F.cosine_similarity(v_t, v0, dim=0).item()
-        feat_cos_dist = 1.0 - cos_sim
-
-        A_Gram = A_t @ A_t.T
-        A_Gram = 0.5 * (A_Gram + A_Gram.T)  # numerical symmetrization
-        try:
-            feat_gram_lambda = torch.linalg.eigvalsh(A_Gram)[0].item()
-        except Exception:
-            print("Numerical instability occured when computing lambda_min of feature matrix. Defaulting to feat_gram_lambda=1.")
-            feat_gram_lambda = float("nan")
-    else:
-        feat_rel_dist, feat_cos_dist, feat_gram_lambda = float("nan"), float("nan"), float("nan")
+        feat_rel_dist = float("nan")
+        feat_cos_dist = float("nan")
+        feat_gram_lambda = float("nan")
 
     return {
         "train_loss": train_loss,
@@ -110,14 +118,11 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
 
 @torch.no_grad()
 def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_norm0, fc1_norm0, fc2_norm0, data):
+    """Compute metrics for the linearized model with the same public key names."""
     X_train = data["X_train"]
-    X_test  = data["X_test"]
+    X_test = data["X_test"]
     y_train = data["y_train"]
-    y_test  = data["y_test"]
-    if "y_train_one_hot" in data:
-        y_train_one_hot = data["y_train_one_hot"]
-    else:
-        y_train_one_hot = None
+    y_test = data["y_test"]
 
     outputs_train = linearized_forward(model, base_params_dict, lin_params, X_train)
     pred_train = outputs_train.argmax(dim=1)
@@ -127,13 +132,11 @@ def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_nor
     pred_test = outputs_test.argmax(dim=1)
     test_acc = (pred_test == y_test).float().mean().item()
 
-    if y_train_one_hot is not None:
-        train_loss = loss_fn(outputs_train, y_train_one_hot).item()
-    else:
-        train_loss = loss_fn(outputs_train, y_train).item()
+    # Same target convention as get_stats: prefer one-hot labels when present.
+    train_loss = loss_fn(outputs_train, data.get("y_train_one_hot", y_train)).item()
 
-    param_dist = torch.sqrt(sum((p-p0).pow(2).sum() for p, p0 in zip(lin_params, lin_params0))).item()
-    param_norm = torch.sqrt(sum((p).pow(2).sum() for p in lin_params)).item()
+    param_dist = _param_dist(lin_params, lin_params0)
+    param_norm = _param_l2(lin_params)
     fc1_norm = torch.sqrt(lin_params[0].pow(2).sum()).item()
     fc2_norm = torch.sqrt(lin_params[1].pow(2).sum()).item()
 
@@ -147,9 +150,10 @@ def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_nor
         "lin_param_norm_fc2": fc2_norm / (fc2_norm0 + 1e-12),
     }
 
+
 @torch.no_grad()
 def get_nn_lin_param_dist(params, lin_params, normalize_by=None, eps=1e-12):
-    # Compute L2 and cosine distance between NN params and linearized params.
+    """Return L2 and cosine distance between NN and linearized parameters."""
     total_sq = 0
     dot      = 0
     norm_n   = 0
@@ -165,13 +169,13 @@ def get_nn_lin_param_dist(params, lin_params, normalize_by=None, eps=1e-12):
         l2_dist /= float(normalize_by) + eps
 
     cos_sim = dot / ((math.sqrt(norm_n) * math.sqrt(norm_l)) + eps)
-    cos_sim = max(-1.0, min(1.0, cos_sim)) # handles numerical instability that arises on the regression data
+    cos_sim = max(-1.0, min(1.0, cos_sim))
     cos_dist = 1.0 - cos_sim
 
     return l2_dist, cos_dist
 
-# this part should *not* be inside "no_grad" blocks/functions
 def compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq=None, eps=1e-12):
+    """Compare current probe Jacobians to saved initial Jacobians using autograd."""
     jac_curr = compute_param_jacobians(model, X_probe)
     total_sq = 0.
     dot = 0.0
@@ -191,13 +195,13 @@ def compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq=None, eps=1
     l2_dist  = math.sqrt(total_sq)
 
     cos_sim = dot / ((math.sqrt(norm_c_sq) * math.sqrt(norm_i_sq)) + eps)
-    cos_sim = max(-1.0, min(1.0, cos_sim)) # handles numerical instability that arises on the regression data
+    cos_sim = max(-1.0, min(1.0, cos_sim))
     cos_dist = 1.0 - cos_sim
 
     return l2_dist, cos_dist
 
-# this part should *not* be inside "no_grad" blocks/functions
 def compute_dataset_ntk_drift(model, model_at_init, X_data, batch_size=1, eps=1e-12):
+    """Estimate dataset NTK drift by recomputing current/init Jacobians in batches."""
     device = next(model.parameters()).device
     total_sq = 0.0
     dot = 0.0
@@ -222,16 +226,16 @@ def compute_dataset_ntk_drift(model, model_at_init, X_data, batch_size=1, eps=1e
         del jac_curr, jac_init  # free per-batch Jacobians
 
     l2_dist  = math.sqrt(total_sq) / (math.sqrt(norm_i_sq) + eps)
-    
+
     cos_sim = dot / ((math.sqrt(norm_c_sq) * math.sqrt(norm_i_sq)) + eps)
-    cos_sim = max(-1.0, min(1.0, cos_sim)) # handles numerical instability that arises on the regression data
+    cos_sim = max(-1.0, min(1.0, cos_sim))
     cos_dist = 1.0 - cos_sim
 
     return l2_dist, cos_dist
 
 @torch.no_grad()
 def compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v):
-    # compute Song's theoretical upper bound on the distance from the init
+    """Compute Song's theoretical upper bound on distance from initialization."""
     sigma_max_X = torch.linalg.svdvals(X_train).max().item()
     H0 = F.tanh(X_train @ W0.T)
     sigma_min_phi_W0X = torch.linalg.svdvals(H0).min().item()
@@ -240,19 +244,19 @@ def compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v):
 
 @torch.no_grad()
 def estimate_lambda_min(X, M=10000, batch_g=64, device=None):
-    # estimate λ_min(E[φ(𝐗𝐠) φ(𝐗𝐠)]) by sampling 𝐠 for M times and then averaging
+    """Monte Carlo estimate of lambda_min(E[phi(Xg) phi(Xg)])."""
     n, d = X.shape
     A = torch.zeros((n, n), device=device, dtype=X.dtype)
     done = 0
     while done < M:
         b = min(batch_g, M - done)
-        G = torch.randn(d, b, device=device, dtype=X.dtype) # (d,b)
-        Y = torch.tanh(X @ G)                               # (n,b)
-        A += (Y @ Y.T)                                      # sum_k y_k y_k^T over batch
+        G = torch.randn(d, b, device=device, dtype=X.dtype)
+        Y = torch.tanh(X @ G)
+        A += (Y @ Y.T)
         done += b
 
     A /= M
-    A = (A + A.T) * 0.5                                     # symmetrize for numerical safety
+    A = (A + A.T) * 0.5
     try:
         lam_min = torch.linalg.eigvalsh(A)[0].item()
     except Exception:
@@ -260,11 +264,8 @@ def estimate_lambda_min(X, M=10000, batch_g=64, device=None):
     return lam_min
 
 def estimate_loss_floor(X_train, noisy_beta, m, device):
-    # compute L_∞ from analysis
-    n,d        = X_train.shape
+    """Estimate the analysis-predicted loss floor for noisy training."""
+    n, d = X_train.shape
     lambda_min = estimate_lambda_min(X_train, device=device)
     loss_floor = (2/lambda_min) * ((n/noisy_beta) * (1 + d/m) + (n/noisy_beta)**2 * (1 + d*d/m))
     return loss_floor
-
-# for name, metrics_per_seed in results.items():
-#     print(f"loss floor estimation for run {name}: {metrics_per_seed[0]["loss_floor"]}")
