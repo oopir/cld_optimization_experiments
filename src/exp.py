@@ -161,6 +161,7 @@ def _load_eta_table(path: Path) -> Dict[str, Any]:
         data = yaml.safe_load(f)
         if data is None:
             print(f"[eta] WARNING: loading eta from '{path}' failed; using defaults.")
+            return {}
     return data
 
 def _resolve_eta(config: ExpConfig, alpha: float, beta: float) -> float:
@@ -170,23 +171,17 @@ def _resolve_eta(config: ExpConfig, alpha: float, beta: float) -> float:
     if default_eta is None:
         default_eta = config.eta
 
-    # print(f"[eta_debug] mode={mode}, table_path={table_path}")
-    # print(f"[eta_debug] alpha={alpha} (type={type(alpha)}), beta={beta} (type={type(beta)})")
-
-
     if mode == "scalar" or table_path is None:
-        # print(f"[eta_debug] scalar mode or no table -> eta={config.eta}")
         return config.eta
 
     table = _load_eta_table(table_path)
-    # print(f"[eta_debug] loaded table top-level keys: {list(table.keys())}")
 
     if mode == "per_beta":
         per_beta = table.get("per_beta", {})
         key = _format_scalar_for_key(beta)
         if key in per_beta:
             return float(per_beta[key])
-        print(f"[eta_debug] MISS -> fallback eta_default={default_eta}")
+        print(f"[eta] WARNING: missing beta={key}; using eta_default={default_eta}")
         return float(default_eta)
 
     if mode == "per_alpha_beta":
@@ -194,14 +189,11 @@ def _resolve_eta(config: ExpConfig, alpha: float, beta: float) -> float:
         a_str = _format_scalar_for_key(alpha)
         b_str = _format_scalar_for_key(beta)
         key = f"alpha={a_str},beta={b_str}"
-        # optional: debug once
-        # print(f"[eta_debug] per_alpha_beta keys: {list(per_ab.keys())}")
-        # print(f"[eta_debug] lookup key: {key!r}")
         if key in per_ab:
             return float(per_ab[key])
         return float(default_eta)
 
-    print(f"[eta_debug] unknown mode '{mode}' -> scalar eta={config.eta}")
+    print(f"[eta] WARNING: unknown mode '{mode}'; using scalar eta={config.eta}")
     return config.eta
 
 # -------------------------------------------------------------------------- #
@@ -465,48 +457,47 @@ def _write_base_ckpt_data_for_beta_to_disk(
 
     return resume_paths
 
+
+def _iter_alpha_beta_pairs(alpha_range: Optional[List[float]], beta_range: Optional[List[float]]):
+    betas = beta_range or []
+    alphas = alpha_range or []
+    if not alphas:
+        return [(None, beta) for beta in betas]
+    return list(itertools.product(alphas, betas))
+
+
+def _labels_for_config(config: ExpConfig) -> List[str]:
+    return [
+        label_from_alpha_beta(alpha=alpha, beta=beta, n=config.n)
+        for alpha, beta in _iter_alpha_beta_pairs(config.alphas, config.betas)
+    ]
+
+
 def _train_over_range(
     config: ExpConfig,
-    alpha_range: list = [],
-    beta_range: list = [],
+    alpha_range: Optional[List[float]] = None,
+    beta_range: Optional[List[float]] = None,
     gpu_ids: Optional[List[int]] = None,
-    resume_root = None,
-    base_results = None,
+    resume_root=None,
+    base_results=None,
     epoch_offset: int = 0,
 ) -> Dict[str, Metrics]: 
-    
     results: ResultsByLabel = {}
-    
-    if len(alpha_range) == 0:
-        for beta in beta_range:
-            label = label_from_alpha_beta(beta=beta, n=config.n)
-            resume_paths = None
-            if base_results != None:
-                resume_paths = _write_base_ckpt_data_for_beta_to_disk(label, base_results[label], resume_root)
-            metrics = _train_single_alpha_beta(
-                config, 
-                beta=beta, 
-                gpu_ids=gpu_ids, 
-                resume_paths=resume_paths, 
-                epoch_offset=epoch_offset
-            )
-            results[label] = metrics
-    else:
-        for alpha in alpha_range:
-            for beta in beta_range:
-                label = label_from_alpha_beta(alpha=alpha, beta=beta, n=config.n)
-                resume_paths = None
-                if base_results != None:
-                    resume_paths = _write_base_ckpt_data_for_beta_to_disk(label, base_results[label], resume_root)
-                metrics = _train_single_alpha_beta(
-                    config, 
-                    alpha=alpha, 
-                    beta=beta, 
-                    gpu_ids=gpu_ids, 
-                    resume_paths=resume_paths, 
-                    epoch_offset=epoch_offset
-                )
-                results[label] = metrics
+
+    for alpha, beta in _iter_alpha_beta_pairs(alpha_range, beta_range):
+        label = label_from_alpha_beta(alpha=alpha, beta=beta, n=config.n)
+        resume_paths = None
+        if base_results is not None:
+            resume_paths = _write_base_ckpt_data_for_beta_to_disk(label, base_results[label], resume_root)
+
+        pair_kwargs = {"beta": beta} if alpha is None else {"alpha": alpha, "beta": beta}
+        results[label] = _train_single_alpha_beta(
+            config,
+            gpu_ids=gpu_ids,
+            resume_paths=resume_paths,
+            epoch_offset=epoch_offset,
+            **pair_kwargs,
+        )
     
     return results
 
@@ -598,14 +589,7 @@ def resume_from_ckpt(
     base_effective_epochs = _infer_last_epoch_from_results(base_results, config.epochs)
     if new_epochs <= base_effective_epochs:
         raise ValueError(f"new_epochs ({new_epochs}) must be > existing epochs ({base_effective_epochs})")
-    if len(config.alphas) == 0:
-        expected_labels = [label_from_alpha_beta(beta=beta, n=config.n) for beta in config.betas]
-    else:
-        expected_labels = [
-            label_from_alpha_beta(alpha=alpha, beta=beta, n=config.n)
-            for alpha in config.alphas
-            for beta in config.betas
-        ]
+    expected_labels = _labels_for_config(config)
     if set(base_results.keys()) != set(expected_labels):
         raise ValueError("Checkpoint alpha/betas do not match config.alphas/config.betas.")
 
