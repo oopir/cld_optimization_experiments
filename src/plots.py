@@ -249,7 +249,7 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
             bb.y1 + (max_h - h) + pad_top,
         )
 
-        fig.savefig(f"expr1_{name}.pdf", bbox_inches=bbox_equal)
+        fig.savefig(f"plots/expr1_{name}.pdf", bbox_inches=bbox_equal)
 
     # restore full figure (optional)
     for a in axes_list:
@@ -257,7 +257,7 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
     if legend is not None:
         legend.set_visible(True)
 
-    fig.savefig(f"expr1_full.pdf", bbox_inches="tight")
+    fig.savefig(f"plots/expr1_full.pdf", bbox_inches="tight")
 
 def plot_test_error_vs_alpha(results, output_path="alpha_test_error.pdf"):
     """

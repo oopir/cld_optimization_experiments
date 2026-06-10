@@ -220,6 +220,7 @@ def main():
     p.add_argument("--beta-linewidth", type=float, default=1.4)
     p.add_argument("--all-linewidth", type=float, default=2)
     p.add_argument("--out-prefix", default=None)
+    p.add_argument("--outdir", default="plots")
     args = p.parse_args()
 
     results, cfg = load_checkpoint(Path(args.ckpt).expanduser())
@@ -257,7 +258,7 @@ def main():
         cfg,
         "beta",
         args.metric,
-        f"{out_prefix}_by_beta.pdf",
+        args.outdir + "/" + f"{out_prefix}_by_beta.pdf",
         yscale,
         args.beta_linewidth,
         ylabel,
@@ -269,7 +270,7 @@ def main():
         cfg,
         "seed",
         args.metric,
-        f"{out_prefix}_by_seed.pdf",
+        args.outdir + "/" + f"{out_prefix}_by_seed.pdf",
         yscale,
         args.linewidth,
         ylabel,
@@ -280,7 +281,7 @@ def main():
         results,
         cfg,
         args.metric,
-        f"{out_prefix}_all_betas_seeds.pdf",
+        args.outdir + "/" + f"{out_prefix}_all_betas_seeds.pdf",
         all_yscale,
         args.all_linewidth,
         ylabel,

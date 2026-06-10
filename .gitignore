@@ -1,5 +1,6 @@
 # PDFs
 *.pdf
+plots/
 
 # Logs
 *.log

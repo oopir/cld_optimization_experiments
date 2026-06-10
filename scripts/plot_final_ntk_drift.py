@@ -185,7 +185,7 @@ def main():
     """Parse arguments, compute drifts, and save PDF figure(s)."""
     p = argparse.ArgumentParser()
     p.add_argument("checkpoint")
-    p.add_argument("--outdir", default=None)
+    p.add_argument("--outdir", default="plots")
     p.add_argument("--device", choices=["gpu", "cpu"], default="gpu")
     p.add_argument("--probe-size", type=int, default=None)
     p.add_argument("--alpha", type=float, default=None)
