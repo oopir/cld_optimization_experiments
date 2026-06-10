@@ -15,14 +15,13 @@ from .linearized import (
     linearized_forward,
 )
 from .stats import (
-    BASE_METRIC_NAMES,
-    LIN_METRIC_NAMES,
     get_stats,
     get_linear_stats,
     get_nn_lin_param_dist,
     compute_dataset_jac_drift,
     estimate_loss_floor
 )
+from .metric_config import BASE_METRIC_NAMES, LIN_METRIC_NAMES, MetricPlan
 
 # -------------------------------------------------------------------------- #
 # ------------------------------- dataclasses ------------------------------ #
@@ -60,17 +59,16 @@ class TrainArgs:
     regularization_scale: float
     use_linearized: bool
     same_noise: bool
-    track_jacobian: bool
     jac_probe_size: int
     device: str
     track_every: int
     print_every: int
     epoch_offset: int
-    collect_feature_stats: bool
     noise_free_after_epoch: Optional[int]
     early_stop_metric: Optional[str]
     early_stop_goal: str
     early_stop_value: Optional[float]
+    metric_plan: MetricPlan
 
 @dataclass
 class MultiSeedWorkerArgs:
@@ -165,15 +163,15 @@ def _init_jacobian_track_vars(d, d_out, m, init_type, alpha, device, model):
     model_at_init.load_state_dict(model.state_dict())
     return model_at_init
 
-def _init_metrics(track_jacobian):
+def _init_metrics(metric_plan):
     """Create metric history lists using the public checkpoint key names."""
-    metrics = {f"{name}_hist": [] for name in BASE_METRIC_NAMES}
-    if track_jacobian:
-        metrics["jacobian_dist_hist"] = []
-    for name in LIN_METRIC_NAMES:
-        metrics[f"{name}_hist"] = []
-    metrics["nn_lin_param_dist_hist"] = []
+    metrics = {
+        f"{name}_hist": []
+        for name in metric_plan.tracked_metrics
+        if name in metric_plan.history_metrics
+    }
     metrics["epoch_hist"] = []
+    metrics["tracked_metrics"] = list(metric_plan.tracked_metrics)
     return metrics
 
 # -------------------------------------------------------------------------- #
@@ -232,7 +230,7 @@ def _should_stop_early(metric_name, goal, threshold, stats, lin_stats):
         return False, None
     if metric_name in stats:
         current = stats[metric_name]
-    elif metric_name.startswith("lin_") and metric_name in lin_stats:
+    elif metric_name in lin_stats:
         current = lin_stats[metric_name]
     else:
         return False, None
@@ -261,7 +259,7 @@ def _apply_training_step(base, lin, beta, eta, regularization_scale, same_noise,
         langevin_step(base.params, base.lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
         langevin_step(lin.params, lin.lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
 
-def _record_linear_metrics(metrics, base, lin, data):
+def _record_linear_metrics(metrics, base, lin, data, metric_plan):
     """Append linearized metrics and NN-vs-linearized distances."""
     lin_stats = get_linear_stats(
         base.model,
@@ -269,11 +267,16 @@ def _record_linear_metrics(metrics, base, lin, data):
         lin.params,
         lin.params0,
         data,
+        metric_plan,
     )
     for name in LIN_METRIC_NAMES:
-        metrics[f"{name}_hist"].append(lin_stats[name])
+        if name in metric_plan.history_metrics:
+            metrics[f"{name}_hist"].append(lin_stats[name])
 
-    metrics["nn_lin_param_dist_hist"].append(get_nn_lin_param_dist(base.params, lin.params, normalize_by=base.param_norm0))
+    if "nn_lin_param_dist" in metric_plan.compute_metrics:
+        lin_stats["nn_lin_param_dist"] = get_nn_lin_param_dist(base.params, lin.params, normalize_by=base.param_norm0)
+        if "nn_lin_param_dist" in metric_plan.history_metrics:
+            metrics["nn_lin_param_dist_hist"].append(lin_stats["nn_lin_param_dist"])
     return lin_stats
 
 def _record_epoch_metrics(
@@ -283,8 +286,7 @@ def _record_epoch_metrics(
     data,
     A0,
     A0_norm,
-    collect_feature_stats,
-    track_jacobian,
+    metric_plan,
     model_at_init,
     jac_probe_size,
     epoch,
@@ -299,28 +301,28 @@ def _record_epoch_metrics(
         A0,
         A0_norm,
         data,
-        collect_feature_stats,
+        metric_plan,
     )
     for name in BASE_METRIC_NAMES:
-        metrics[f"{name}_hist"].append(stats[name])
+        if name in metric_plan.history_metrics:
+            metrics[f"{name}_hist"].append(stats[name])
 
-    if track_jacobian:
+    if "jacobian_dist" in metric_plan.compute_metrics:
         jacobian_dist = \
             compute_dataset_jac_drift(base.model, model_at_init, data["X_train"], jac_probe_size)
-        metrics["jacobian_dist_hist"].append(jacobian_dist)
+        stats["jacobian_dist"] = jacobian_dist
+        if "jacobian_dist" in metric_plan.history_metrics:
+            metrics["jacobian_dist_hist"].append(jacobian_dist)
 
-    lin_stats = _record_linear_metrics(metrics, base, lin, data) if lin is not None else {}
+    lin_stats = _record_linear_metrics(metrics, base, lin, data, metric_plan) if lin is not None else {}
     return stats, lin_stats
 
-def _finalize_metrics(metrics, base, lin, data, beta, m, device, collect_feature_stats, init_state_for_metrics):
+def _finalize_metrics(metrics, base, lin, data, beta, m, device, metric_plan, init_state_for_metrics):
     """Attach final bounds, RNG state, and checkpoint payload tensors."""
     metrics["rng_state"] = _save_rng_state(device)
 
-    if collect_feature_stats:
+    if "loss_floor" in metric_plan.final_metrics:
         metrics["loss_floor"] = estimate_loss_floor(data["X_train"], beta, m=m, device=device)
-    else:
-        metrics["param_dist_upper_bound"] = float("nan")
-        metrics["loss_floor"] = float("nan")
 
     metrics["model_state_dict"] = _copy_state_dict_to_cpu(base.model.state_dict())
     metrics["init_model_state_dict"] = init_state_for_metrics
@@ -361,7 +363,7 @@ def train(data, args, resume_state=None):
                 p.data.copy_(p_prev.to(device=p.device, dtype=p.dtype))
 
     model_at_init = None
-    if args.track_jacobian:
+    if args.metric_plan.needs_jacobian_reference:
         model_at_init = _init_jacobian_track_vars(
             data["d_in"], 
             data["d_out"], 
@@ -369,16 +371,17 @@ def train(data, args, resume_state=None):
             args.init_type, 
             args.alpha, 
             args.device, 
-            base.model, 
-            X_train, 
-            args.jac_probe_size
+            base.model,
         )
 
-    with torch.no_grad():
-        A0 = torch.tanh(X_train @ base.model.fc1.weight.T)
-        A0_norm = A0.norm().item()
+    A0 = None
+    A0_norm = None
+    if args.metric_plan.needs_initial_features:
+        with torch.no_grad():
+            A0 = torch.tanh(X_train @ base.model.fc1.weight.T)
+            A0_norm = A0.norm().item()
 
-    metrics = _init_metrics(args.track_jacobian)
+    metrics = _init_metrics(args.metric_plan)
     metrics["stopped_early"] = False
 
     if resume_state.start_model_state_dict is not None:
@@ -395,7 +398,7 @@ def train(data, args, resume_state=None):
         A0,
         A0_norm,
         data,
-        args.collect_feature_stats,
+        args.metric_plan,
     )
 
     last_epoch = args.epoch_offset
@@ -410,8 +413,7 @@ def train(data, args, resume_state=None):
                 data,
                 A0,
                 A0_norm,
-                args.collect_feature_stats,
-                args.track_jacobian,
+                args.metric_plan,
                 model_at_init,
                 args.jac_probe_size,
                 epoch,
@@ -462,7 +464,7 @@ def train(data, args, resume_state=None):
         args.beta,
         args.m,
         args.device,
-        args.collect_feature_stats,
+        args.metric_plan,
         init_state_for_metrics,
     )
 
