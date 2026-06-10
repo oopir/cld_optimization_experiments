@@ -148,8 +148,8 @@ def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_nor
     }
 
 @torch.no_grad()
-def get_nn_lin_param_dist(params, lin_params, eps=1e-12):
-    # compute cosine distance between NN params and lin params
+def get_nn_lin_param_dist(params, lin_params, normalize_by=None, eps=1e-12):
+    # Compute L2 and cosine distance between NN params and linearized params.
     total_sq = 0
     dot      = 0
     norm_n   = 0
@@ -161,6 +161,8 @@ def get_nn_lin_param_dist(params, lin_params, eps=1e-12):
         norm_l += float((pl**2).sum().item())
 
     l2_dist = math.sqrt(total_sq)
+    if normalize_by is not None:
+        l2_dist /= float(normalize_by) + eps
 
     cos_sim = dot / ((math.sqrt(norm_n) * math.sqrt(norm_l)) + eps)
     cos_sim = max(-1.0, min(1.0, cos_sim)) # handles numerical instability that arises on the regression data

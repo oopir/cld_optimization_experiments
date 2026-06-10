@@ -234,7 +234,7 @@ def train(
                 nn_to_lin_dist = torch.sqrt(sum((p-q).pow(2).sum() for p, q in zip(params, lin_params))).item()
                 metrics["nn_to_lin_hist"].append(nn_to_lin_dist)
 
-                nn_lin_param_dist = get_nn_lin_param_dist(params, lin_params)
+                nn_lin_param_dist = get_nn_lin_param_dist(params, lin_params, normalize_by=param_norm0)
                 metrics["nn_lin_param_dist_hist"].append(nn_lin_param_dist)
 
             if print_every == 1 or epoch % print_every == 1:
