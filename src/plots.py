@@ -1,4 +1,5 @@
 from itertools import cycle
+from pathlib import Path
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -21,22 +22,102 @@ mpl.rcParams.update(
 )
 
 def _mean_std_across_seeds(results_by_seed, key):
+    """Average one scalar history over seeds, truncating to epochs all seeds reached."""
     histories = [np.asarray(r[key]) for r in results_by_seed.values()]
-    
-    # truncate histories to the same length (different seeds might haved reached early stopping at different times)
+
+    # Different seeds may have stopped at different epochs.
     min_len = min(h.shape[0] for h in histories)
     histories = [h[:min_len] for h in histories]
-    
+
     arr = np.stack(histories, axis=0)
-    
+
     return arr.mean(axis=0), arr.std(axis=0), min_len
 
+
+def _base_epoch_axis(results_by_seed, track_every):
+    """Build the epoch axis for plotted metric histories, preferring checkpointed epoch_hist."""
+    epoch_histories = [
+        np.asarray(metrics["epoch_hist"])
+        for metrics in results_by_seed.values()
+        if "epoch_hist" in metrics
+    ]
+    if epoch_histories:
+        min_len = min(h.shape[0] for h in epoch_histories)
+        return epoch_histories[0][:min_len]
+
+    lengths = [len(r["train_loss_hist"]) for r in results_by_seed.values()]
+    num_steps = min(lengths) if lengths else 0
+    return np.arange(1, num_steps * track_every + 1, track_every)
+
+
+def _mean_std_tuple_component(results_by_seed, key, component):
+    """Average one component of tuple histories such as (L2, cosine) distances."""
+    histories = [np.asarray(r[key]) for r in results_by_seed.values()]
+    min_len = min(h.shape[0] for h in histories)
+    arr = np.stack([h[:min_len] for h in histories], axis=0)
+    return arr[:, :, component].mean(axis=0), arr[:, :, component].std(axis=0), min_len
+
+
 def _plot_band(ax, x, mean, std, label, color, lin=False, lw=2.0):
+    """Plot a mean history with a seed-std band."""
     linestyle = "--" if lin else "-"
     ax.plot(x, mean, label=label, color=color, linestyle=linestyle, linewidth=lw)
     ax.fill_between(x, mean - std, mean + std, alpha=0.2, color=color, linewidth=0.0)
 
-def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
+
+def _plot_l2_cos_metric(results_by_seed, axes, base_x, key, axis_l2, axis_cos, label, color):
+    """Plot distance histories stored as (L2, cosine), e.g. NTK drift or NN-vs-linearized."""
+    l2_mean, l2_std, length = _mean_std_tuple_component(results_by_seed, key, component=0)
+    l2_mean[0] = max(l2_mean[0], 1e-12)
+    _plot_band(axes[axis_l2], base_x[:length], l2_mean, l2_std, label=label, color=color)
+
+    co_mean, co_std, length = _mean_std_tuple_component(results_by_seed, key, component=1)
+    _plot_band(axes[axis_cos], base_x[:length], co_mean, co_std, label=label, color=color)
+
+
+def _save_individual_axes(fig, axes, axes_list, plot_output_dir):
+    """Save each subplot as its own PDF in the configured plot_output_dir."""
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    legend = fig.legends[0] if fig.legends else None
+
+    bboxes_in = {}
+    widths = []
+    heights = []
+    for name, ax in axes.items():
+        bb_in = ax.get_tightbbox(renderer).transformed(fig.dpi_scale_trans.inverted())
+        bboxes_in[name] = bb_in
+        widths.append(bb_in.x1 - bb_in.x0)
+        heights.append(bb_in.y1 - bb_in.y0)
+
+    max_w = max(widths)
+    max_h = max(heights)
+    pad_lr = 0.03
+    pad_top = 0.05
+    pad_bottom = 0.0
+
+    for name, ax in axes.items():
+        for candidate in axes_list:
+            candidate.set_visible(candidate is ax)
+        if legend is not None:
+            legend.set_visible(False)
+
+        bb = bboxes_in[name]
+        bbox_equal = Bbox.from_extents(
+            bb.x0 - pad_lr,
+            bb.y0 - pad_bottom,
+            bb.x0 + max_w + pad_lr,
+            bb.y1 + (max_h - (bb.y1 - bb.y0)) + pad_top,
+        )
+        fig.savefig(plot_output_dir / f"expr1_{name}.pdf", bbox_inches=bbox_equal)
+
+    for ax in axes_list:
+        ax.set_visible(True)
+    if legend is not None:
+        legend.set_visible(True)
+
+
+def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_output_dir="plots"):
     """
     Plot one internally consistent experiment batch.
 
@@ -46,16 +127,14 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
     and lin_train_loss_hist. Mixed old/new checkpoint sets are not handled gently.
     Different history lengths from early stopping are okay; we truncate per run.
     """
-    # check if any run actually tracked jacobian distances
+    plot_output_dir = Path(plot_output_dir)
+    plot_output_dir.mkdir(parents=True, exist_ok=True)
+
     has_jacobian_any = any(
         any("jacobian_dist_hist" in r for r in run_results_by_seed.values())
         for run_results_by_seed in results.values()
     )
-    # if not has_jacobian_any:
-    #     raise RuntimeError("plot_ex1_multiseed expects Jacobian data")
 
-    # ------------------------- figure config ------------------------- #
-    # ('axes' dict is used later, so don't push this section to the end)
     fig = plt.figure(figsize=(8, 13.0))
     gs = gridspec.GridSpec(4, 2, hspace=0.4, wspace=0.3)
     ax1l = plt.subplot(gs[0, 0])
@@ -73,8 +152,6 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         "jacobian_dist_co": ax1r,
         "nn_to_lin_dist_l2": ax2l,
         "nn_to_lin_dist_co": ax2r,
-        # "feat_rel_dist": ax3l,
-        # "feat_cos_dist": ax3r,
         "train_loss": ax3l,
         "train_loss_with_lin": ax3r,
         "feat_gram_lambda": ax4l,
@@ -84,80 +161,46 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         "jacobian_dist_co": "Distance (cosine)",
         "nn_to_lin_dist_l2": "Distance (L2, normalized)",
         "nn_to_lin_dist_co": "Distance (cosine)",
-        # "feat_rel_dist": "Distance (L2)",
-        # "feat_cos_dist": "Distance (cosine)",
         "feat_gram_lambda": r'$\lambda_{\min}$',
         "train_loss": "Training loss",
         "train_loss_with_lin": "Training loss",
      }
     log_axes = {"feat_gram_lambda"}
 
-    # ------------------------ actual plotting ------------------------ #
     colors = cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
 
     for run_name, run_results_by_seed in results.items():
         c = next(colors)
+        base_x = _base_epoch_axis(run_results_by_seed, track_every)
 
-        # per-run x: prefer epoch_hist if present, else infer from train_loss_hist length
-        some_seed_metrics = next(iter(run_results_by_seed.values()))
-        if "epoch_hist" in some_seed_metrics:
-            base_x = np.asarray(some_seed_metrics["epoch_hist"])
-        else:
-            lengths = [len(r["train_loss_hist"]) for r in run_results_by_seed.values()]
-            T_run = max(lengths) if lengths else 0
-            base_x = np.arange(1, T_run * track_every + 1, track_every)
-
-        # jacobian distances
         if has_jacobian_any:
-            jac_histories = [np.asarray(r["jacobian_dist_hist"]) for r in run_results_by_seed.values()]
-            
-            min_len = min(h.shape[0] for h in jac_histories)
-            jac_histories = [h[:min_len] for h in jac_histories]
-            x = base_x[:min_len]
+            _plot_l2_cos_metric(
+                run_results_by_seed,
+                axes,
+                base_x,
+                key="jacobian_dist_hist",
+                axis_l2="jacobian_dist_l2",
+                axis_cos="jacobian_dist_co",
+                label=run_name,
+                color=c,
+            )
 
-            jac_arr = np.stack(jac_histories, axis=0)  # (n_seeds, T, 2)
-            l2_mean = jac_arr[:, :, 0].mean(axis=0)
-            l2_std  = jac_arr[:, :, 0].std(axis=0)
-            l2_mean[0] = max(l2_mean[0], 1e-12)
-            _plot_band(axes["jacobian_dist_l2"], x, l2_mean, l2_std, label=run_name, color=c)
-            co_mean = jac_arr[:, :, 1].mean(axis=0)
-            co_std  = jac_arr[:, :, 1].std(axis=0)
-            _plot_band(axes["jacobian_dist_co"], x, co_mean, co_std, label=run_name, color=c)
-
-        # param distances
         if use_linearized:
-            param_histories = [np.asarray(r["nn_lin_param_dist_hist"]) for r in run_results_by_seed.values()]
-            
-            min_len = min(h.shape[0] for h in param_histories)
-            param_histories = [h[:min_len] for h in param_histories]
-            x = base_x[:min_len]
-            
-            param_arr = np.stack(param_histories, axis=0)  # (n_seeds, T, 2)
-            l2_mean = param_arr[:, :, 0].mean(axis=0)
-            l2_std  = param_arr[:, :, 0].std(axis=0)
-            l2_mean[0] = max(l2_mean[0], 1e-12)
-            _plot_band(axes["nn_to_lin_dist_l2"], x, l2_mean, l2_std, label=run_name, color=c)
-            co_mean = param_arr[:, :, 1].mean(axis=0)
-            co_std  = param_arr[:, :, 1].std(axis=0)
-            _plot_band(axes["nn_to_lin_dist_co"], x, co_mean, co_std, label=run_name, color=c)
+            _plot_l2_cos_metric(
+                run_results_by_seed,
+                axes,
+                base_x,
+                key="nn_lin_param_dist_hist",
+                axis_l2="nn_to_lin_dist_l2",
+                axis_cos="nn_to_lin_dist_co",
+                label=run_name,
+                color=c,
+            )
 
-        # # relative feature distance
-        # mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_rel_dist_hist")
-        # mean[0] = max(mean[0], 1e-12)
-        # x = base_x[:L]
-        # _plot_band(axes["feat_rel_dist"], x, mean, std, label=run_name, color=c)
-
-        # # cosine feature distance
-        # mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_cos_dist_hist")
-        # x = base_x[:L]
-        # _plot_band(axes["feat_cos_dist"], x, mean, std, label=run_name, color=c)
-
-        # min eigenvalue of Gram(A_t)
         mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_gram_lambda_hist")
         x = base_x[:L]
         _plot_band(axes["feat_gram_lambda"], x, mean, std, label=run_name, color=c)
 
-        # accuracy/loss (nonlinear vs linearized)
         mean, std, L = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
         x = base_x[:L]
         _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.5)
@@ -184,8 +227,6 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         for spine in ax.spines.values():
             spine.set_linewidth(0.8)
 
-    # handles, labels = axes["train_loss"].get_legend_handles_labels()
-    # fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.95), ncol=3, frameon=False,)
     ax1l.legend(
         loc="center",
         bbox_to_anchor=(0.76, 0.30),
@@ -200,64 +241,12 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
     )
     ax3l.legend(loc="best", frameon=False, fontsize=12)
     plt.tight_layout(rect=[0, 0, 1, 0.93])
-    
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
 
     axes_list = [ax1l, ax1r, ax2l, ax2r, ax3l, ax3r, ax4l, ax4r]
-    legend = fig.legends[0] if fig.legends else None
+    _save_individual_axes(fig, axes, axes_list, plot_output_dir)
 
-    # --- per-axis tight bboxes in inches ---
-    bboxes_in = {}
-    widths = []
-    heights = []
-    for name, ax in axes.items():
-        bb = ax.get_tightbbox(renderer)
-        bb_in = bb.transformed(fig.dpi_scale_trans.inverted())
-        bboxes_in[name] = bb_in
-        widths.append(bb_in.x1 - bb_in.x0)
-        heights.append(bb_in.y1 - bb_in.y0)
+    fig.savefig(plot_output_dir / "expr1_full.pdf", bbox_inches="tight")
 
-    max_w = max(widths)
-    max_h = max(heights)
-
-    pad_lr = 0.03   # horizontal padding (both sides)
-    pad_top = 0.05  # vertical padding at top
-    pad_bottom = 0.0  # keep bottom essentially tight
-
-    for name, ax in axes.items():
-        # show only this axis
-        for a in axes_list:
-            a.set_visible(a is ax)
-        # hide global legend
-        if legend is not None:
-            legend.set_visible(False)
-
-        bb = bboxes_in[name]
-        w = bb.x1 - bb.x0
-        h = bb.y1 - bb.y0
-
-        # bbox with:
-        # - same left boundary across all axes (bb.x0 - pad_lr)
-        # - same total width (max_w + 2*pad_lr)
-        # - bottom ~tight (bb.y0 - pad_bottom)
-        # - extra height added only at the top to reach max_h
-        bbox_equal = Bbox.from_extents(
-            bb.x0 - pad_lr,
-            bb.y0 - pad_bottom,
-            bb.x0 + max_w + pad_lr,
-            bb.y1 + (max_h - h) + pad_top,
-        )
-
-        fig.savefig(f"plots/expr1_{name}.pdf", bbox_inches=bbox_equal)
-
-    # restore full figure (optional)
-    for a in axes_list:
-        a.set_visible(True)
-    if legend is not None:
-        legend.set_visible(True)
-
-    fig.savefig(f"plots/expr1_full.pdf", bbox_inches="tight")
 
 def plot_test_error_vs_alpha(results, output_path="alpha_test_error.pdf"):
     """

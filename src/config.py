@@ -81,6 +81,7 @@ class RunOpts:
     resume_from_ckpt: bool = False
     new_total_epochs: Optional[int] = None
     config_overrides: Optional[List[str]] = None
+    plot_output_dir:  Path = Path("plots")
 
 
 def save_checkpoint(path, results, config: ExpConfig):
