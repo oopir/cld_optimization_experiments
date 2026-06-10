@@ -43,40 +43,12 @@ class ExpConfig:
     print_every: int = 100
     collect_feature_stats: bool = True
 
-    def train_kwargs(self):
-        return dict(
-            seeds=self.seeds,
-            device=self.device,
-            dataset=self.dataset,
-            n=self.n,
-            random_labels=self.random_labels,
-            reserve_last=self.reserve_last,
-            m=self.m,
-            init_type=self.init_type,
-            lam_fc1=self.lam_fc1,
-            lam_fc2=self.lam_fc2,
-            epochs=self.epochs,
-            eta=self.eta,
-            regularization_scale=self.regularization_scale,
-            noise_free_after_epoch=self.noise_free_after_epoch,
-            early_stop_metric=self.early_stop_metric,
-            early_stop_goal=self.early_stop_goal,
-            early_stop_value=self.early_stop_value,
-            use_linearized=self.use_linearized,
-            same_noise=self.same_noise,
-            track_jacobian=self.track_jacobian,
-            jac_probe_size=self.jac_probe_size,
-            track_every=self.track_every,
-            print_every=self.print_every,
-            collect_feature_stats=self.collect_feature_stats, 
-        )
-
 
 @dataclass
 class RunOpts:
     ckpt_dir:         Path
     save_ckpt:        bool = False # for saving progress after training
-    load_ckpt:        bool = False # for plotting/extending an existing ckpt  
+    load_ckpt:        bool = False # for plotting/extending an existing ckpt
     load_ckpt_name:   Optional[Path] = None
     resume_from_ckpt: bool = False
     new_total_epochs: Optional[int] = None
@@ -123,5 +95,3 @@ def load_checkpoint(path):
 
     config = patch_loaded_config(payload["config"])
     return payload["results"], config
-
-

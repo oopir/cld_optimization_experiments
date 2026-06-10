@@ -1,5 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass, replace
 import multiprocessing as mp
+from typing import Optional
 
 import random
 import numpy as np
@@ -25,10 +27,83 @@ from .stats import (
 )
 
 # -------------------------------------------------------------------------- #
+# ------------------------------- dataclasses ------------------------------ #
+# -------------------------------------------------------------------------- #
+
+@dataclass
+class BaseModelVars:
+    """Bundle NN state that is reused across training, metrics, and checkpointing."""
+    model: TwoLayerNet
+    params: list
+    lam_tensors: list
+    params0: list
+    param_norm0: float
+    fc1_norm0: float
+    fc2_norm0: float
+    W0: torch.Tensor
+
+@dataclass
+class LinearizationVars:
+    """Bundle linearized-model state so train() does not pass seven parallel values."""
+    base_params_dict: dict
+    params: list
+    lam_tensors: list
+    params0: list
+    param_norm0: float
+    fc1_norm0: float
+    fc2_norm0: float
+
+@dataclass
+class TrainArgs:
+    """Bundle options for one train() call."""
+    eta: float
+    epochs: int
+    beta: float
+    m: int
+    init_type: str
+    alpha: float
+    lam_fc1: Optional[float]
+    lam_fc2: Optional[float]
+    regularization_scale: float
+    use_linearized: bool
+    same_noise: bool
+    track_jacobian: bool
+    jac_probe_size: int
+    device: str
+    track_every: int
+    print_every: int
+    epoch_offset: int
+    collect_feature_stats: bool
+    noise_free_after_epoch: Optional[int]
+    early_stop_metric: Optional[str]
+    early_stop_goal: str
+    early_stop_value: Optional[float]
+
+@dataclass
+class MultiSeedWorkerArgs:
+    """Bundle per-(alpha,beta) options sent to each seed worker."""
+    n: int
+    random_labels: bool
+    reserve_last: int
+    train: TrainArgs
+    resume_paths: Optional[dict]
+
+@dataclass
+class ResumeState:
+    """State loaded from a seed checkpoint before continuing training."""
+    init_model_state_dict: Optional[dict] = None
+    start_model_state_dict: Optional[dict] = None
+    start_lin_params: Optional[list] = None
+    rng_state: Optional[dict] = None
+    last_epoch: Optional[int] = None
+    stopped_early: bool = False
+
+# -------------------------------------------------------------------------- #
 # ---------------- save/load random state for checkpointing ---------------- #
 # -------------------------------------------------------------------------- #
 
 def _save_rng_state(device: str):
+    """Capture Python, NumPy, Torch CPU, and optional CUDA RNG state for resume."""
     state = {
         "python": random.getstate(),
         "numpy": np.random.get_state(),
@@ -44,6 +119,7 @@ def _save_rng_state(device: str):
     return state
 
 def _load_rng_state(device: str, state):
+    """Restore RNG state saved in checkpoints before continuing a run."""
     if state is None:
         return
     random.setstate(state["python"])
@@ -62,6 +138,7 @@ def _load_rng_state(device: str, state):
 # -------------------------------------------------------------------------- #
 
 def _init_base_model_vars(d_in, d_out, m, init_type, alpha, device, lam_fc1, lam_fc2, init_model_state_dict=None):
+    """Initialize the NN and fixed-at-init quantities used by training stats."""
 
     model = TwoLayerNet(d_in=d_in, m=m, d_out=d_out, init_type=init_type, alpha=alpha).to(device)
     if init_model_state_dict is not None:
@@ -76,9 +153,10 @@ def _init_base_model_vars(d_in, d_out, m, init_type, alpha, device, lam_fc1, lam
 
     W0 = model.fc1.weight.detach().clone()
 
-    return model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0
+    return BaseModelVars(model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0)
 
 def _init_linearization_vars(model, params0, lam_tensors):
+    """Initialize the linearized model around the NN initialization."""
 
     base_params_dict, lin_params, lin_lam_tensors = init_linearization(model, params0, lam_tensors)
     lin_params0 = [p.detach().clone() for p in lin_params]
@@ -87,11 +165,18 @@ def _init_linearization_vars(model, params0, lam_tensors):
         lin_fc1_norm0 = torch.sqrt(lin_params0[0].pow(2).sum()).item()
         lin_fc2_norm0 = torch.sqrt(lin_params0[1].pow(2).sum()).item()
 
-    return (base_params_dict, lin_params, lin_lam_tensors, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0)
+    return LinearizationVars(
+        base_params_dict,
+        lin_params,
+        lin_lam_tensors,
+        lin_params0,
+        lin_param_norm0,
+        lin_fc1_norm0,
+        lin_fc2_norm0,
+    )
 
 def _init_jacobian_track_vars(d, d_out, m, init_type, alpha, device, model, X_train, probe_bs):
-    # model_at_init is made in case we will want to track Jacobian
-    # drift w.r.t. full Jacobian and not just a partial probe
+    """Prepare an initialization copy for full-dataset NTK/Jacobian drift tracking."""
     model_at_init = TwoLayerNet(d_in=d, m=m, d_out=d_out, init_type=init_type, alpha=alpha).to(device)
     model_at_init.load_state_dict(model.state_dict())
 
@@ -102,6 +187,7 @@ def _init_jacobian_track_vars(d, d_out, m, init_type, alpha, device, model, X_tr
     return model_at_init, X_probe, jac_init, jac_init_norm_sq
 
 def _init_metrics(track_jacobian):
+    """Create metric history lists using the public checkpoint key names."""
     metrics = {f"{name}_hist": [] for name in BASE_METRIC_NAMES}
     if track_jacobian:
         metrics["jacobian_dist_hist"] = []
@@ -116,7 +202,40 @@ def _init_metrics(track_jacobian):
 # -------------------- train (& handle parallelization) -------------------- #
 # -------------------------------------------------------------------------- #
 
+def _copy_state_dict_to_cpu(state_dict):
+    """Detach checkpoint-bound state dict tensors and move them to CPU."""
+    return {k: v.detach().cpu() for k, v in state_dict.items()}
+
+def _print_training_start(device, alpha, beta, eta, epoch_offset, epochs):
+    """Print the compact per-worker training/resume status line."""
+    if epoch_offset < epochs:
+        print(
+            f"device {device}: training starts for alpha={alpha}, beta={beta}, eta={eta} "
+            f"from epoch={epoch_offset+1}...",
+            flush=True,
+        )
+    else:
+        print(f"device {device}: no need to train for alpha={alpha}, beta={beta} (early stopping triggered)")
+
+def _print_epoch_progress(device, epoch, stats):
+    """Print the compact progress line at print_every checkpoints."""
+    print(
+        f"device {device} | "
+        f"epoch {epoch:8d} | "
+        f"loss {stats['train_loss']:.4f} | "
+        f"train acc {stats['train_acc']:.3f} | "
+        f"test acc {stats['test_acc']:.3f}",
+        flush=True,
+    )
+
+def _zero_grads(params):
+    """Clear manually managed parameter gradients before backward passes."""
+    for p in params:
+        if p.grad is not None:
+            p.grad.zero_()
+
 def _forward_backward(model, data, batch_size=1024):
+    """Accumulate NN gradients over the full training set in batches."""
     X_train = data["X_train"]
     N = X_train.size(0)
     for start in range(0, N, batch_size):
@@ -129,219 +248,316 @@ def _forward_backward(model, data, batch_size=1024):
         loss = loss_fn(outputs, yb) * (len(xb) / N)
         loss.backward()
 
-def train(
-    data,
-    eta,
-    epochs,
-    beta,
-    m,
-    init_type="standard",
-    alpha=1.0,
-    lam_fc1=None,
-    lam_fc2=None,
-    regularization_scale=1.0,
-    use_linearized=True,
-    same_noise=False,
-    track_jacobian=True,
-    jac_probe_size=1,
-    device="cpu",
-    track_every=1,
-    print_every=100,
-    init_model_state_dict=None,
-    start_model_state_dict=None,
-    start_lin_params=None,
-    resume_rng_state=None,
-    epoch_offset=0,
-    noise_free_after_epoch=None,
-    collect_feature_stats=True,
-    early_stop_metric=None,
-    early_stop_goal="min",
-    early_stop_value=None,
-):
-
-    # --------- init environment & compute values at init for stats -------- #
-    X_train = data["X_train"]
-
-    model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0 = \
-        _init_base_model_vars(data["d_in"], data["d_out"], m, init_type, alpha, device, lam_fc1, lam_fc2, init_model_state_dict)
-
-    if init_model_state_dict is not None:
-        init_state_for_metrics = {k: v.detach().cpu() for k, v in init_model_state_dict.items()}
+def _should_stop_early(metric_name, goal, threshold, stats, lin_stats):
+    """Evaluate early-stop criteria against NN or linearized metrics."""
+    if metric_name is None or threshold is None:
+        return False, None
+    if metric_name in stats:
+        current = stats[metric_name]
+    elif metric_name.startswith("lin_") and metric_name in lin_stats:
+        current = lin_stats[metric_name]
     else:
-        init_state_for_metrics = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+        return False, None
 
-    if use_linearized:
-        (
-            base_params_dict, lin_params, lin_lam_tensors, lin_params0,
-            lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0
-        ) = _init_linearization_vars(model, params0, lam_tensors)
-        if start_lin_params is not None:
-            for p, p_prev in zip(lin_params, start_lin_params):
-                p.data.copy_(p_prev.to(device=p.device, dtype=p.dtype))
+    should_stop = (goal == "min" and current <= threshold) or (goal == "max" and current >= threshold)
+    return should_stop, current
+
+def _apply_training_step(base, lin, beta, eta, regularization_scale, same_noise, noise_free_after_epoch, epoch):
+    """Apply Langevin updates, including shared-noise and noise-free tail modes."""
+    deterministic = noise_free_after_epoch is not None and epoch > noise_free_after_epoch
+    current_beta = float("inf") if deterministic else beta
+
+    if lin is None:
+        langevin_step(base.params, base.lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
+    elif same_noise:
+        joint_langevin_step(
+            base.params,
+            base.lam_tensors,
+            lin.params,
+            lin.lam_tensors,
+            beta=current_beta,
+            eta=eta,
+            regularization_scale=regularization_scale,
+        )
+    else:
+        langevin_step(base.params, base.lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
+        langevin_step(lin.params, lin.lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
+
+def _record_linear_metrics(metrics, base, lin, data):
+    """Append linearized metrics and NN-vs-linearized distances."""
+    lin_stats = get_linear_stats(
+        base.model,
+        lin.base_params_dict,
+        lin.params,
+        lin.params0,
+        lin.param_norm0,
+        lin.fc1_norm0,
+        lin.fc2_norm0,
+        data,
+    )
+    for name in LIN_METRIC_NAMES:
+        metrics[f"{name}_hist"].append(lin_stats[name])
+
+    nn_to_lin_dist = torch.sqrt(sum((p - q).pow(2).sum() for p, q in zip(base.params, lin.params))).item()
+    metrics["nn_to_lin_hist"].append(nn_to_lin_dist)
+    metrics["nn_lin_param_dist_hist"].append(get_nn_lin_param_dist(base.params, lin.params, normalize_by=base.param_norm0))
+    return lin_stats
+
+def _record_epoch_metrics(
+    metrics,
+    base,
+    lin,
+    data,
+    A0,
+    A0_norm,
+    collect_feature_stats,
+    track_jacobian,
+    model_at_init,
+    jac_probe_size,
+    epoch,
+):
+    """Append all metrics tracked at a scheduled epoch."""
+    metrics["epoch_hist"].append(epoch)
+
+    stats = get_stats(
+        base.model,
+        base.params,
+        base.params0,
+        base.param_norm0,
+        base.fc1_norm0,
+        base.fc2_norm0,
+        A0,
+        A0_norm,
+        data,
+        collect_feature_stats,
+    )
+    for name in BASE_METRIC_NAMES:
+        metrics[f"{name}_hist"].append(stats[name])
 
     if track_jacobian:
-        # model_at_init, X_probe, jac_init, jac_init_norm_sq = \
-        #     _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, device, model, X_train, jac_probe_size)
-        model_at_init, _, _, _ = \
-            _init_jacobian_track_vars(data["d_in"], data["d_out"], m, init_type, alpha, device, model, X_train, jac_probe_size)
+        jacobian_dist = compute_dataset_ntk_drift(
+            base.model,
+            model_at_init,
+            data["X_train"],
+            batch_size=jac_probe_size,
+        )
+        metrics["jacobian_dist_hist"].append(jacobian_dist)
 
+    lin_stats = _record_linear_metrics(metrics, base, lin, data) if lin is not None else {}
+    return stats, lin_stats
 
-    with torch.no_grad():
-        A0 = torch.tanh(X_train @ model.fc1.weight.T)
-        A0_norm = A0.norm().item()
-
-    metrics = _init_metrics(track_jacobian)
-    metrics["stopped_early"] = False
-
-    if start_model_state_dict is not None:
-        model.load_state_dict(start_model_state_dict)
-
-    if resume_rng_state is not None:
-        _load_rng_state(device, resume_rng_state)
-
-    if epoch_offset < epochs:
-        print(f"device {device}: training starts for alpha={alpha}, beta={beta}, eta={eta} from epoch={epoch_offset+1}...", flush=True)
-    else:
-        print(f"device {device}: no need to train for alpha={alpha}, beta={beta} (early stopping triggered)")
-    stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats)
-    sup_sigma_max_v = stats["sigma_max_v"]
-    # print(f"epoch {0:8d} | loss {stats['train_loss']:.4f} | train acc {stats['train_acc']:.3f} | test acc {stats['test_acc']:.3f}")
-
-    last_epoch = epoch_offset
-    for epoch in range(epoch_offset + 1, epochs + 1):
-        last_epoch = epoch
-        # -------------------- compute metrics and stats -------------------- #
-        model.eval()
-        if track_every == 1 or epoch % track_every == 1:
-            metrics["epoch_hist"].append(epoch)
-
-            stats = get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats)
-            for name in BASE_METRIC_NAMES:
-                metrics[f"{name}_hist"].append(stats[name])
-            sup_sigma_max_v = max(sup_sigma_max_v, stats["sigma_max_v"])
-
-            # this part should *not* be inside "no_grad" blocks/functions
-            if track_jacobian:
-                # jacobian_dist = compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq)
-                jacobian_dist = compute_dataset_ntk_drift(model, model_at_init, X_train, batch_size=jac_probe_size)
-                metrics["jacobian_dist_hist"].append(jacobian_dist)
-
-            if use_linearized:
-                lin_stats = get_linear_stats(model, base_params_dict, lin_params, lin_params0, lin_param_norm0, lin_fc1_norm0, lin_fc2_norm0, data)
-
-                for name in LIN_METRIC_NAMES:
-                    metrics[f"{name}_hist"].append(lin_stats[name])
-                nn_to_lin_dist = torch.sqrt(sum((p-q).pow(2).sum() for p, q in zip(params, lin_params))).item()
-                metrics["nn_to_lin_hist"].append(nn_to_lin_dist)
-
-                nn_lin_param_dist = get_nn_lin_param_dist(params, lin_params, normalize_by=param_norm0)
-                metrics["nn_lin_param_dist_hist"].append(nn_lin_param_dist)
-
-            if print_every == 1 or epoch % print_every == 1:
-                print(
-                    f"device {device} | "
-                    f"epoch {epoch:8d} | "
-                    f"loss {stats['train_loss']:.4f} | "
-                    f"train acc {stats['train_acc']:.3f} | "
-                    f"test acc {stats['test_acc']:.3f}",
-                    flush=True
-                )
-
-            # stop early (if needed)
-            if early_stop_metric is not None and early_stop_value is not None:
-                # get the value that should dictate stopping
-                if early_stop_metric in stats:
-                    cur = stats[early_stop_metric]
-                elif use_linearized and 'lin_' in early_stop_metric and early_stop_metric in lin_stats:
-                    cur = lin_stats[early_stop_metric]
-                else:
-                    cur = None
-                # decide whether to stop or continue
-                if cur is not None:
-                    goal = early_stop_goal
-                    if (goal == "min" and cur <= early_stop_value) or (goal == "max" and cur >= early_stop_value):
-                        print(f"device {device}: early stopping, epoch={epoch}, {early_stop_metric}={cur:.3f}")
-                        metrics["stopped_early"] = True
-                        break
-
-
-        # ------------------ compute grads & perform steps ------------------ #
-        # NN forward + backward
-        model.train()
-        for p in params:
-            if p.grad is not None:
-                p.grad.zero_()
-        _forward_backward(model, data, batch_size=1024)
-        # lin forward + backward
-        if use_linearized:
-            for p in lin_params:
-                if p.grad is not None:
-                    p.grad.zero_()
-            lin_outputs = linearized_forward(model, base_params_dict, lin_params, X_train)
-            if "y_train_one_hot" in data:
-                lin_train_loss = loss_fn(lin_outputs, data["y_train_one_hot"])
-            else:
-                lin_train_loss = loss_fn(lin_outputs, data["y_train"])
-            lin_train_loss.backward()
-        # training step(s)
-        deterministic = noise_free_after_epoch is not None and epoch > noise_free_after_epoch
-        current_beta = float("inf") if deterministic else beta
-        if not use_linearized:
-            langevin_step(params, lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
-        else:
-            if same_noise:
-                joint_langevin_step(params, lam_tensors, lin_params, lin_lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
-            else:
-                langevin_step(params, lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
-                langevin_step(lin_params, lin_lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
-
-    metrics["last_epoch"] = last_epoch
+def _finalize_metrics(metrics, base, lin, data, beta, m, device, sup_sigma_max_v, collect_feature_stats, init_state_for_metrics):
+    """Attach final bounds, RNG state, and checkpoint payload tensors."""
     metrics["rng_state"] = _save_rng_state(device)
 
-    # -------------------- compute remaining stats --------------------- #
     if collect_feature_stats:
-        metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v)
-        metrics["loss_floor"] = estimate_loss_floor(X_train, beta, m=m, device=device)
+        metrics["param_dist_upper_bound"] = compute_dist_bound_under_GF(data["X_train"], base.W0, sup_sigma_max_v)
+        metrics["loss_floor"] = estimate_loss_floor(data["X_train"], beta, m=m, device=device)
     else:
         metrics["param_dist_upper_bound"] = float("nan")
         metrics["loss_floor"] = float("nan")
-        
-    metrics["model_state_dict"] = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+
+    metrics["model_state_dict"] = _copy_state_dict_to_cpu(base.model.state_dict())
     metrics["init_model_state_dict"] = init_state_for_metrics
-    if use_linearized:
-        metrics["lin_params_state"] = [p.detach().cpu() for p in lin_params]
+    if lin is not None:
+        metrics["lin_params_state"] = [p.detach().cpu() for p in lin.params]
 
     return metrics
+
+def train(data, args, resume_state=None):
+    """Run the training loop for one initialized dataset."""
+    if resume_state is None:
+        resume_state = ResumeState()
+
+    X_train = data["X_train"]
+
+    base = _init_base_model_vars(
+        data["d_in"],
+        data["d_out"],
+        args.m,
+        args.init_type,
+        args.alpha,
+        args.device,
+        args.lam_fc1,
+        args.lam_fc2,
+        resume_state.init_model_state_dict,
+    )
+
+    if resume_state.init_model_state_dict is not None:
+        init_state_for_metrics = _copy_state_dict_to_cpu(resume_state.init_model_state_dict)
+    else:
+        init_state_for_metrics = _copy_state_dict_to_cpu(base.model.state_dict())
+
+    lin = None
+    if args.use_linearized:
+        lin = _init_linearization_vars(base.model, base.params0, base.lam_tensors)
+        if resume_state.start_lin_params is not None:
+            for p, p_prev in zip(lin.params, resume_state.start_lin_params):
+                p.data.copy_(p_prev.to(device=p.device, dtype=p.dtype))
+
+    model_at_init = None
+    if args.track_jacobian:
+        model_at_init, _, _, _ = _init_jacobian_track_vars(
+            data["d_in"], 
+            data["d_out"], 
+            args.m, 
+            args.init_type, 
+            args.alpha, 
+            args.device, 
+            base.model, 
+            X_train, 
+            args.jac_probe_size
+        )
+
+    with torch.no_grad():
+        A0 = torch.tanh(X_train @ base.model.fc1.weight.T)
+        A0_norm = A0.norm().item()
+
+    metrics = _init_metrics(args.track_jacobian)
+    metrics["stopped_early"] = False
+
+    if resume_state.start_model_state_dict is not None:
+        base.model.load_state_dict(resume_state.start_model_state_dict)
+
+    if resume_state.rng_state is not None:
+        _load_rng_state(args.device, resume_state.rng_state)
+
+    _print_training_start(args.device, args.alpha, args.beta, args.eta, args.epoch_offset, args.epochs)
+    stats = get_stats(
+        base.model,
+        base.params,
+        base.params0,
+        base.param_norm0,
+        base.fc1_norm0,
+        base.fc2_norm0,
+        A0,
+        A0_norm,
+        data,
+        args.collect_feature_stats,
+    )
+    sup_sigma_max_v = stats["sigma_max_v"]
+
+    last_epoch = args.epoch_offset
+    for epoch in range(args.epoch_offset + 1, args.epochs + 1):
+        last_epoch = epoch
+        base.model.eval()
+        if args.track_every == 1 or epoch % args.track_every == 1:
+            stats, lin_stats = _record_epoch_metrics(
+                metrics,
+                base,
+                lin,
+                data,
+                A0,
+                A0_norm,
+                args.collect_feature_stats,
+                args.track_jacobian,
+                model_at_init,
+                args.jac_probe_size,
+                epoch,
+            )
+            sup_sigma_max_v = max(sup_sigma_max_v, stats["sigma_max_v"])
+
+            if args.print_every == 1 or epoch % args.print_every == 1:
+                _print_epoch_progress(args.device, epoch, stats)
+
+            should_stop, cur = _should_stop_early(
+                args.early_stop_metric,
+                args.early_stop_goal,
+                args.early_stop_value,
+                stats,
+                lin_stats,
+            )
+            if should_stop:
+                print(f"device {args.device}: early stopping, epoch={epoch}, {args.early_stop_metric}={cur:.3f}")
+                metrics["stopped_early"] = True
+                break
+
+        base.model.train()
+        _zero_grads(base.params)
+        _forward_backward(base.model, data, batch_size=1024)
+
+        if lin is not None:
+            _zero_grads(lin.params)
+            lin_outputs = linearized_forward(base.model, lin.base_params_dict, lin.params, X_train)
+            lin_targets = data.get("y_train_one_hot", data["y_train"])
+            loss_fn(lin_outputs, lin_targets).backward()
+
+        _apply_training_step(
+            base,
+            lin,
+            args.beta,
+            args.eta,
+            args.regularization_scale,
+            args.same_noise,
+            args.noise_free_after_epoch,
+            epoch,
+        )
+
+    metrics["last_epoch"] = last_epoch
+    return _finalize_metrics(
+        metrics,
+        base,
+        lin,
+        data,
+        args.beta,
+        args.m,
+        args.device,
+        sup_sigma_max_v,
+        args.collect_feature_stats,
+        init_state_for_metrics,
+    )
+
+# -------------------------------------------------------------------------- #
+
+def _load_data_for_seed(dataset, args, run_seed, device):
+    """Load the configured dataset for one seed on that worker's device."""
+    if dataset == "digits":
+        return load_digits_data(n=args.n, random_labels=args.random_labels, device=device, seed=run_seed)
+    if dataset == "mnist":
+        return load_mnist_data(
+            n=args.n,
+            random_labels=args.random_labels,
+            device=device,
+            seed=run_seed,
+            reserve_last=args.reserve_last,
+        )
+    raise ValueError(f"Unsupported dataset: {dataset}")
+
+def _load_resume_state(resume_paths, run_seed):
+    """Load optional per-seed resume payload prepared by exp.py."""
+    if resume_paths is None:
+        return ResumeState()
+
+    path = resume_paths.get(run_seed)
+    if path is None:
+        return ResumeState()
+
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    return ResumeState(
+        init_model_state_dict=payload.get("init_model_state_dict", None),
+        start_model_state_dict=payload.get("start_model_state_dict", None),
+        start_lin_params=payload.get("start_lin_params", None),
+        rng_state=payload.get("rng_state", None),
+        last_epoch=payload.get("last_epoch", None),
+        stopped_early=payload.get("stopped_early", False),
+    )
+
+def _effective_epoch_window(args, resume_state):
+    """Return the epoch bounds for normal runs or already-stopped resumed seeds."""
+    if not resume_state.stopped_early:
+        return args.train.epoch_offset, args.train.epochs
+
+    if resume_state.last_epoch is not None:
+        last_epoch = int(resume_state.last_epoch)
+        return last_epoch, last_epoch
+
+    return args.train.epoch_offset, args.train.epoch_offset
 
 def _train_multiseed_worker(
     dataset,
     run_seed,
     device,
-    n,
-    random_labels,
-    reserve_last,
-    eta,
-    epochs,
-    beta,
-    m,
-    init_type,
-    alpha,
-    lam_fc1,
-    lam_fc2,
-    regularization_scale,
-    use_linearized,
-    same_noise,
-    track_jacobian,
-    jac_probe_size,
-    track_every,
-    print_every,
-    resume_paths=None,
-    epoch_offset=0,
-    collect_feature_stats=True, 
-    noise_free_after_epoch=None,
-    early_stop_metric=None,
-    early_stop_goal="min",
-    early_stop_value=None,
+    args,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -352,104 +568,20 @@ def _train_multiseed_worker(
     np.random.seed(run_seed)
     random.seed(run_seed)
 
-    if dataset == "digits":
-        data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=run_seed)
-    elif dataset == "mnist":
-        data = load_mnist_data(n=n, random_labels=random_labels, device=device, seed=run_seed, reserve_last=reserve_last)
-    else:
-        raise ValueError(f"Unsupported dataset: {dataset}")
+    data = _load_data_for_seed(dataset, args, run_seed, device)
+    resume_state = _load_resume_state(args.resume_paths, run_seed)
+    call_epoch_offset, call_epochs = _effective_epoch_window(args, resume_state)
+    train_args = replace(args.train, device=device, epoch_offset=call_epoch_offset, epochs=call_epochs)
 
-    init_state = None
-    start_state = None
-    start_lin_params = None
-    rng_state = None
-    last_epoch = None
-    stopped_early = False
-    if resume_paths is not None:
-        p = resume_paths.get(run_seed)
-        if p is not None:
-            resume = torch.load(p, map_location="cpu", weights_only=False)
-            init_state = resume.get("init_model_state_dict", None)
-            start_state = resume.get("start_model_state_dict", None)
-            start_lin_params = resume.get("start_lin_params", None)
-            rng_state = resume.get("rng_state", None)
-            last_epoch = resume.get("last_epoch", None)
-            stopped_early = resume.get("stopped_early", False)
+    return run_seed, train(data, train_args, resume_state)
 
-    # decide how many epochs (and from what offset) this seed should actually run
-    call_epoch_offset = epoch_offset
-    call_epochs = epochs
-    if stopped_early:
-        if last_epoch is not None:
-            call_epoch_offset = int(last_epoch)
-            call_epochs = int(last_epoch)
-        else: # fallback
-            call_epoch_offset = epoch_offset
-            call_epochs = epoch_offset
+# -------------------------------------------------------------------------- #
 
-    metrics = train(
-        data=data,
-        eta=eta,
-        epochs=call_epochs,
-        beta=beta,
-        m=m,
-        init_type=init_type,
-        alpha=alpha,
-        lam_fc1=lam_fc1,
-        lam_fc2=lam_fc2,
-        regularization_scale=regularization_scale,
-        use_linearized=use_linearized,
-        same_noise=same_noise,
-        track_jacobian=track_jacobian,
-        jac_probe_size=jac_probe_size,
-        device=device,
-        track_every=track_every,
-        print_every=print_every,
-        init_model_state_dict=init_state,
-        start_model_state_dict=start_state,
-        start_lin_params=start_lin_params,
-        resume_rng_state=rng_state,
-        epoch_offset=call_epoch_offset,
-        collect_feature_stats=collect_feature_stats,     
-        noise_free_after_epoch=noise_free_after_epoch,
-        early_stop_metric=early_stop_metric,
-        early_stop_goal=early_stop_goal,
-        early_stop_value=early_stop_value,
-    )
-
-    return run_seed, metrics
-
-# note to self - do not forget that the argument order matters because of how we call this function
 def train_multiseed(
     dataset,
     seeds,
-    n,
-    random_labels,
-    reserve_last,
-    eta,
-    epochs,
-    beta,
-    m,
-    init_type="standard",
-    alpha=1.0,
-    lam_fc1=None,
-    lam_fc2=None,
-    regularization_scale=1.0,
-    use_linearized=True,
-    same_noise=False,
-    track_jacobian=True,
-    jac_probe_size=1,
-    device="cpu",
-    track_every=1,
-    print_every=100,
-    epoch_offset=0,
+    args,
     gpu_ids=None,
-    resume_paths=None,
-    collect_feature_stats=True,  
-    noise_free_after_epoch=None,
-    early_stop_metric=None,
-    early_stop_goal="min",
-    early_stop_value=None,
 ):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -458,41 +590,13 @@ def train_multiseed(
     if not seeds:
         return results
 
-    args_except_seeds = (
-        n,
-        random_labels,
-        reserve_last,
-        eta,
-        epochs,
-        beta,
-        m,
-        init_type,
-        alpha,
-        lam_fc1,
-        lam_fc2,
-        regularization_scale,
-        use_linearized,
-        same_noise,
-        track_jacobian,
-        jac_probe_size,
-        track_every,
-        print_every,
-        resume_paths,
-        epoch_offset,
-        collect_feature_stats,
-        noise_free_after_epoch,
-        early_stop_metric,
-        early_stop_goal,
-        early_stop_value,
-    )
-
     # create a list of gpu ids & set gpus to spawn
-    base_device = device
+    base_device = args.train.device
     if gpu_ids is None:
-        if device.startswith("cuda") and torch.cuda.is_available():
-            if ":" in device:
+        if base_device.startswith("cuda") and torch.cuda.is_available():
+            if ":" in base_device:
                 # if user asks for an explicit device, e.g. "cuda:1"
-                idx = int(device.split(":", 1)[1])
+                idx = int(base_device.split(":", 1)[1])
                 gpu_ids = [idx]
             else:
                 num_gpus = torch.cuda.device_count()
@@ -506,7 +610,7 @@ def train_multiseed(
             gpu_ids = [None]
     else:
         # user provided the GPU indices once for the whole experiment
-        if device.startswith("cuda") and torch.cuda.is_available():
+        if base_device.startswith("cuda") and torch.cuda.is_available():
             try:
                 mp.set_start_method("spawn", force=True)
             except RuntimeError:
@@ -515,7 +619,7 @@ def train_multiseed(
     if len(seeds) == 1:
         # Sequential fast path (keeps old behavior for single seed)
         dev_str = (base_device if gpu_ids[0] is None else f"cuda:{gpu_ids[0]}")
-        run_seed, metrics = _train_multiseed_worker(dataset, seeds[0], dev_str, *args_except_seeds)
+        run_seed, metrics = _train_multiseed_worker(dataset, seeds[0], dev_str, args)
         results[run_seed] = metrics
         return results
 
@@ -534,7 +638,7 @@ def train_multiseed(
                     dev_str = base_device
                 else:
                     dev_str = f"cuda:{gpu_ids[i % len(gpu_ids)]}"  # round-robin over GPUs
-                futures.append(pool.submit(_train_multiseed_worker, dataset, run_seed, dev_str, *args_except_seeds))
+                futures.append(pool.submit(_train_multiseed_worker, dataset, run_seed, dev_str, args))
 
             for fut in futures:
                 run_seed, metrics = fut.result()
