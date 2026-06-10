@@ -10,9 +10,6 @@ BASE_METRIC_NAMES = [
     "train_acc",
     "test_acc",
     "param_dist",
-    "param_norm",
-    "param_norm_fc1",
-    "param_norm_fc2",
     "feat_rel_dist",
     "feat_cos_dist",
     "feat_gram_lambda",
@@ -22,15 +19,7 @@ LIN_METRIC_NAMES = [
     "lin_train_acc",
     "lin_test_acc",
     "lin_param_dist",
-    "lin_param_norm",
-    "lin_param_norm_fc1",
-    "lin_param_norm_fc2",
 ]
-
-
-def _param_l2(params):
-    """Compute the joint L2 norm for a list of parameter tensors."""
-    return torch.sqrt(sum(p.pow(2).sum() for p in params)).item()
 
 def _param_dist(params, params0):
     """Compute parameter displacement from the matching initialization tensors."""
@@ -58,8 +47,6 @@ def _classification_metrics(model, X, y, loss_targets=None, batch_size=1024):
 
 def _feature_stats(model, X_train, A0, A0_norm):
     """Compute hidden-feature drift metrics used by the experiment plots and bounds."""
-    sigma_max_v = torch.linalg.svdvals(model.fc2.weight).max().item()
-
     A_t = torch.tanh(model.fc1(X_train))
     feat_rel_dist = (A_t - A0).norm().item() / (A0_norm + 1e-12)
 
@@ -74,7 +61,7 @@ def _feature_stats(model, X_train, A0, A0_norm):
         print("Numerical instability occurred when computing lambda_min of feature matrix. Defaulting to nan.")
         feat_gram_lambda = float("nan")
 
-    return sigma_max_v, feat_rel_dist, feat_cos_dist, feat_gram_lambda
+    return feat_rel_dist, feat_cos_dist, feat_gram_lambda
 
 @torch.no_grad()
 def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats):
@@ -90,14 +77,10 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
     test_acc, _ = _classification_metrics(model, X_test, y_test)
 
     param_dist = _param_dist(params, params0)
-    param_norm = _param_l2(params)
-    fc1_norm = torch.sqrt(params[0].pow(2).sum()).item()
-    fc2_norm = torch.sqrt(params[1].pow(2).sum()).item()
-
+    
     if collect_feature_stats:
-        sigma_max_v, feat_rel_dist, feat_cos_dist, feat_gram_lambda = _feature_stats(model, X_train, A0, A0_norm)
+        feat_rel_dist, feat_cos_dist, feat_gram_lambda = _feature_stats(model, X_train, A0, A0_norm)
     else:
-        sigma_max_v = float("nan")
         feat_rel_dist = float("nan")
         feat_cos_dist = float("nan")
         feat_gram_lambda = float("nan")
@@ -107,10 +90,6 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
         "train_acc": train_acc,
         "test_acc": test_acc,
         "param_dist": param_dist,
-        "param_norm": param_norm / (param_norm0 + 1e-12),
-        "param_norm_fc1": fc1_norm / (fc1_norm0 + 1e-12),
-        "param_norm_fc2": fc2_norm / (fc2_norm0 + 1e-12),
-        "sigma_max_v": sigma_max_v,
         "feat_rel_dist": feat_rel_dist,
         "feat_cos_dist": feat_cos_dist,
         "feat_gram_lambda": feat_gram_lambda,
@@ -136,20 +115,13 @@ def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_nor
     train_loss = loss_fn(outputs_train, data.get("y_train_one_hot", y_train)).item()
 
     param_dist = _param_dist(lin_params, lin_params0)
-    param_norm = _param_l2(lin_params)
-    fc1_norm = torch.sqrt(lin_params[0].pow(2).sum()).item()
-    fc2_norm = torch.sqrt(lin_params[1].pow(2).sum()).item()
-
+    
     return {
         "lin_train_loss": train_loss,
         "lin_train_acc": train_acc,
         "lin_test_acc": test_acc,
         "lin_param_dist": param_dist,
-        "lin_param_norm": param_norm / (param_norm0 + 1e-12),
-        "lin_param_norm_fc1": fc1_norm / (fc1_norm0 + 1e-12),
-        "lin_param_norm_fc2": fc2_norm / (fc2_norm0 + 1e-12),
     }
-
 
 @torch.no_grad()
 def get_nn_lin_param_dist(params, lin_params, normalize_by=None, eps=1e-12):
@@ -174,33 +146,7 @@ def get_nn_lin_param_dist(params, lin_params, normalize_by=None, eps=1e-12):
 
     return l2_dist, cos_dist
 
-def compute_jacobian_dist(model, X_probe, jac_init, jac_init_norm_sq=None, eps=1e-12):
-    """Compare current probe Jacobians to saved initial Jacobians using autograd."""
-    jac_curr = compute_param_jacobians(model, X_probe)
-    total_sq = 0.
-    dot = 0.0
-    norm_c_sq = 0.0
-    norm_i_sq = 0.0 if jac_init_norm_sq is None else float(jac_init_norm_sq)
-
-    for jc, ji in zip(jac_curr, jac_init):
-        diff = jc - ji
-        total_sq += float(diff.pow(2).sum().item())
-
-        dot += float((jc * ji).sum().item())
-        norm_c_sq += float((jc * jc).sum().item())
-        if jac_init_norm_sq is None:
-            norm_i_sq += float((ji * ji).sum().item())
-    del jac_curr
-
-    l2_dist  = math.sqrt(total_sq)
-
-    cos_sim = dot / ((math.sqrt(norm_c_sq) * math.sqrt(norm_i_sq)) + eps)
-    cos_sim = max(-1.0, min(1.0, cos_sim))
-    cos_dist = 1.0 - cos_sim
-
-    return l2_dist, cos_dist
-
-def compute_dataset_ntk_drift(model, model_at_init, X_data, batch_size=1, eps=1e-12):
+def compute_dataset_jac_drift(model, model_at_init, X_data, batch_size=1, eps=1e-12):
     """Estimate dataset NTK drift by recomputing current/init Jacobians in batches."""
     device = next(model.parameters()).device
     total_sq = 0.0
@@ -223,7 +169,7 @@ def compute_dataset_ntk_drift(model, model_at_init, X_data, batch_size=1, eps=1e
             norm_c_sq += float((jc * jc).sum().item())
             norm_i_sq += float((ji * ji).sum().item())
 
-        del jac_curr, jac_init  # free per-batch Jacobians
+        del jac_curr, jac_init  # free per-batch Jacobians  
 
     l2_dist  = math.sqrt(total_sq) / (math.sqrt(norm_i_sq) + eps)
 
@@ -232,15 +178,6 @@ def compute_dataset_ntk_drift(model, model_at_init, X_data, batch_size=1, eps=1e
     cos_dist = 1.0 - cos_sim
 
     return l2_dist, cos_dist
-
-@torch.no_grad()
-def compute_dist_bound_under_GF(X_train, W0, sup_sigma_max_v):
-    """Compute Song's theoretical upper bound on distance from initialization."""
-    sigma_max_X = torch.linalg.svdvals(X_train).max().item()
-    H0 = F.tanh(X_train @ W0.T)
-    sigma_min_phi_W0X = torch.linalg.svdvals(H0).min().item()
-    param_dist_upper_bound = sigma_min_phi_W0X / (2 * math.sqrt(2) * sigma_max_X * sup_sigma_max_v)
-    return param_dist_upper_bound
 
 @torch.no_grad()
 def estimate_lambda_min(X, M=10000, batch_g=64, device=None):
