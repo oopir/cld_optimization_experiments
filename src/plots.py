@@ -66,26 +66,29 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
     ax3r = plt.subplot(gs[2, 1])
     ax4l = plt.subplot(gs[3, 0])
     ax4r = plt.subplot(gs[3, 1])
-
+    ax4r.set_axis_off()
+    
     axes = {
         "jacobian_dist_l2": ax1l,
         "jacobian_dist_co": ax1r,
         "nn_to_lin_dist_l2": ax2l,
         "nn_to_lin_dist_co": ax2r,
-        "feat_rel_dist": ax3l,
-        "feat_cos_dist": ax3r,
+        # "feat_rel_dist": ax3l,
+        # "feat_cos_dist": ax3r,
+        "train_loss": ax3l,
+        "train_loss_with_lin": ax3r,
         "feat_gram_lambda": ax4l,
-        "train_loss": ax4r,
     }
     ylabels = {
         "jacobian_dist_l2": "Distance (L2, normalized)",
         "jacobian_dist_co": "Distance (cosine)",
         "nn_to_lin_dist_l2": "Distance (L2, normalized)",
         "nn_to_lin_dist_co": "Distance (cosine)",
-        "feat_rel_dist": "Distance (L2)",
-        "feat_cos_dist": "Distance (cosine)",
+        # "feat_rel_dist": "Distance (L2)",
+        # "feat_cos_dist": "Distance (cosine)",
         "feat_gram_lambda": r'$\lambda_{\min}$',
         "train_loss": "Training loss",
+        "train_loss_with_lin": "Training loss",
      }
     log_axes = {"feat_gram_lambda"}
 
@@ -138,16 +141,16 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
             co_std  = param_arr[:, :, 1].std(axis=0)
             _plot_band(axes["nn_to_lin_dist_co"], x, co_mean, co_std, label=run_name, color=c)
 
-        # relative feature distance
-        mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_rel_dist_hist")
-        mean[0] = max(mean[0], 1e-12)
-        x = base_x[:L]
-        _plot_band(axes["feat_rel_dist"], x, mean, std, label=run_name, color=c)
+        # # relative feature distance
+        # mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_rel_dist_hist")
+        # mean[0] = max(mean[0], 1e-12)
+        # x = base_x[:L]
+        # _plot_band(axes["feat_rel_dist"], x, mean, std, label=run_name, color=c)
 
-        # cosine feature distance
-        mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_cos_dist_hist")
-        x = base_x[:L]
-        _plot_band(axes["feat_cos_dist"], x, mean, std, label=run_name, color=c)
+        # # cosine feature distance
+        # mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_cos_dist_hist")
+        # x = base_x[:L]
+        # _plot_band(axes["feat_cos_dist"], x, mean, std, label=run_name, color=c)
 
         # min eigenvalue of Gram(A_t)
         mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_gram_lambda_hist")
@@ -158,18 +161,21 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
         mean, std, L = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
         x = base_x[:L]
         _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.5)
-        # currently we don't show linearized model loss in any figure
-        # if use_linearized:
-        #     mean, std, L = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
-        #     x = base_x[:L]
-        #     _plot_band(axes["train_loss"], x, mean, std, label="linear", color=c, lin=True, lw=1.5)
-
+        _plot_band(axes["train_loss_with_lin"], x, mean, std, label=run_name, color=c, lw=1.5)
+        if use_linearized:
+            mean, std, L = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
+            x = base_x[:L]
+            _plot_band(axes["train_loss_with_lin"], x, mean, std, label=f"{run_name} linear", color=c, lin=True, lw=1.5)
 
     for k, ax in axes.items():
         ax.set_xlabel("Epoch")
         ax.set_ylabel(ylabels[k])
+        if k in {"train_loss", "train_loss_with_lin"}:
+            ax.set_ylim(-0.05, 0.7)
         if k in log_axes:
             ax.set_yscale("log")
+            if k == "feat_gram_lambda":
+                ax.set_ylim(1.0e4, 2.2e4)
             scale = 1e4
             fmt = mticker.FuncFormatter(lambda y, _: f"{y / scale:g}")
             ax.yaxis.set_major_formatter(fmt)
@@ -180,7 +186,19 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True):
 
     # handles, labels = axes["train_loss"].get_legend_handles_labels()
     # fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.95), ncol=3, frameon=False,)
-    ax4r.legend(loc="best", frameon=False, fontsize=12)
+    ax1l.legend(
+        loc="center",
+        bbox_to_anchor=(0.76, 0.30),
+        frameon=False,
+        fontsize=12,
+    )
+    ax2l.legend(
+        loc="center",
+        bbox_to_anchor=(0.76, 0.30),
+        frameon=False,
+        fontsize=12,
+    )
+    ax3l.legend(loc="best", frameon=False, fontsize=12)
     plt.tight_layout(rect=[0, 0, 1, 0.93])
     
     fig.canvas.draw()

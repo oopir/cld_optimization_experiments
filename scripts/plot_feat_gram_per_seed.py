@@ -13,6 +13,8 @@ if str(REPO_ROOT) not in sys.path:
 os.environ["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+import matplotlib.ticker as mticker
 import numpy as np
 
 from src.config import load_checkpoint
@@ -114,6 +116,98 @@ def plot_panels(results, cfg, by, metric, out, yscale, lw, ylabel, title, distan
     fig.savefig(out, bbox_inches="tight", dpi=300)
 
 
+def plot_all_curves(results, cfg, metric, out, yscale, lw, ylabel, title, distance_type):
+    labels = list(results)
+    seeds = sorted({s for by_seed in results.values() for s in by_seed})
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    linestyles = ["-", "--", "-.", ":"]
+    seed_colors = {seed: colors[i % len(colors)] for i, seed in enumerate(seeds)}
+    label_linestyles = {label: linestyles[i % len(linestyles)] for i, label in enumerate(labels)}
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.9), constrained_layout=False)
+
+    all_x = []
+    for label in labels:
+        for seed in seeds:
+            if seed not in results[label]:
+                continue
+            metrics = results[label][seed]
+            if metric not in metrics:
+                continue
+
+            y = metric_history(metrics, metric, distance_type)
+            if "epoch_hist" in metrics:
+                x = np.asarray(metrics["epoch_hist"])[:len(y)]
+            else:
+                x = np.arange(len(y)) * cfg.track_every
+            all_x.append(x)
+            ax.plot(
+                x,
+                y,
+                lw=lw,
+                alpha=0.85,
+                color=seed_colors[seed],
+                linestyle=label_linestyles[label],
+            )
+
+    if all_x:
+        xmax = max(float(x[-1]) for x in all_x if len(x))
+        if xmax >= 1e6:
+            xmax = math.ceil(xmax / 1e6) * 1e6
+            ax.xaxis.set_major_locator(mticker.MultipleLocator(1e6))
+        ax.set_xlim(left=0, right=xmax)
+
+    # ax.set_title(f"{title} - all betas and seeds", fontsize=16, pad=10)
+    ax.set_yscale(yscale)
+    ax.set_xlabel("Epoch", fontsize=15)
+    ax.set_ylabel(ylabel, fontsize=15)
+    ax.tick_params(axis="both", labelsize=13)
+    if yscale == "linear":
+        ax.ticklabel_format(axis="both", style="sci", scilimits=(0, 0), useMathText=False)
+    #     if metric == "feat_gram_lambda_hist":
+    #         ax.set_ylim(1.0e4, 2.2e4)
+    #         ax.yaxis.set_major_locator(mticker.MultipleLocator(0.2e4))
+
+    seed_handles = [
+        Line2D([0], [0], color=seed_colors[seed], lw=2.2, linestyle="-", label=f"seed {seed}")
+        for seed in seeds
+    ]
+    beta_handles = [
+        Line2D([0], [0], color="0.25", lw=2.2, linestyle=label_linestyles[label], label=str(label))
+        for label in labels
+    ]
+    seed_legend = ax.legend(
+        handles=seed_handles,
+        title="Seed",
+        loc="upper left",
+        bbox_to_anchor=(1.01, 0.95),
+        borderaxespad=0.0,
+        frameon=False,
+        fontsize=13,
+        title_fontsize=14,
+    )
+    ax.add_artist(seed_legend)
+    ax.legend(
+        handles=beta_handles,
+        title="Beta",
+        loc="upper left",
+        bbox_to_anchor=(1.01, 0.45),
+        borderaxespad=0.0,
+        frameon=False,
+        fontsize=13,
+        title_fontsize=14,
+    )
+
+    fig.subplots_adjust(
+        top=0.88,
+        bottom=0.18,
+        left=0.16,
+        right=0.74,
+    )
+
+    fig.savefig(out, bbox_inches="tight", dpi=300)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("ckpt")
@@ -124,6 +218,7 @@ def main():
     p.add_argument("--yscale", choices=["log", "linear"], default=None)
     p.add_argument("--linewidth", type=float, default=2.0)
     p.add_argument("--beta-linewidth", type=float, default=1.4)
+    p.add_argument("--all-linewidth", type=float, default=2)
     p.add_argument("--out-prefix", default=None)
     args = p.parse_args()
 
@@ -155,13 +250,14 @@ def main():
     title = args.title or default_label
     ylabel = args.ylabel or default_label
     yscale = args.yscale or ("log" if args.metric == "feat_gram_lambda_hist" else "linear")
+    all_yscale = args.yscale or "linear"
 
     plot_panels(
         results,
         cfg,
         "beta",
         args.metric,
-        f"{out_prefix}_by_beta.png",
+        f"{out_prefix}_by_beta.pdf",
         yscale,
         args.beta_linewidth,
         ylabel,
@@ -173,9 +269,20 @@ def main():
         cfg,
         "seed",
         args.metric,
-        f"{out_prefix}_by_seed.png",
+        f"{out_prefix}_by_seed.pdf",
         yscale,
         args.linewidth,
+        ylabel,
+        title,
+        args.distance_type,
+    )
+    plot_all_curves(
+        results,
+        cfg,
+        args.metric,
+        f"{out_prefix}_all_betas_seeds.pdf",
+        all_yscale,
+        args.all_linewidth,
         ylabel,
         title,
         args.distance_type,
