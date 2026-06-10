@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace, asdict
+from dataclasses import replace, asdict, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Iterable
@@ -14,16 +14,38 @@ import numpy as np
 import torch
 
 from .config import ExpConfig, RunOpts, save_checkpoint, load_checkpoint
-from .training import train_multiseed
+from .training import MultiSeedWorkerArgs, TrainArgs, train_multiseed
 
 Metrics = Dict[str, Any]
 ResultsByLabel = Dict[str, Dict[int, Metrics]]
 
 EXP1_CHECKPOINT_PREFIX = ""
+_IGNORED_LEGACY_EXP_FIELDS = {"track_param_norms"}
 
 # -------------------------------------------------------------------------- #
 # ----------------------------- config helpers ----------------------------- #
 # -------------------------------------------------------------------------- #
+
+def _parse_beta(beta) -> float:
+    if isinstance(beta, str) and beta in {".inf", "inf", "+inf"}:
+        return np.inf
+    return float(beta)
+
+
+def _prepare_dataclass_kwargs(cls, kwargs: Mapping[str, Any], ignored_fields: set[str] | None = None) -> Dict[str, Any]:
+    ignored_fields = ignored_fields or set()
+    field_names = {f.name for f in fields(cls)}
+    unknown = set(kwargs) - field_names - ignored_fields
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise ValueError(f"Unknown {cls.__name__} config field(s): {names}")
+    return {k: v for k, v in kwargs.items() if k in field_names}
+
+
+def _expand_path_arg(kwargs: Dict[str, Any], key: str) -> None:
+    if key in kwargs and kwargs[key] is not None:
+        kwargs[key] = Path(kwargs[key]).expanduser()
+
 
 def build_from_config_mapping(cfg: dict) -> tuple[ExpConfig, RunOpts]:
     """
@@ -38,20 +60,22 @@ def build_from_config_mapping(cfg: dict) -> tuple[ExpConfig, RunOpts]:
     run_section = cfg.get("run")
 
     if exp_section is None:
-        exp_kwargs = cfg
+        exp_kwargs = dict(cfg)
         run_kwargs = {}
     else:
-        exp_kwargs = exp_section
-        run_kwargs = run_section or {}
+        exp_kwargs = dict(exp_section)
+        run_kwargs = dict(run_section or {})
 
-    exp_kwargs["betas"] = [np.inf if b==".inf" else float(b) for b in exp_kwargs["betas"]]
+    if "betas" in exp_kwargs:
+        exp_kwargs["betas"] = [_parse_beta(b) for b in exp_kwargs["betas"]]
+    exp_kwargs = _prepare_dataclass_kwargs(ExpConfig, exp_kwargs, ignored_fields=_IGNORED_LEGACY_EXP_FIELDS)
 
     exp_config = ExpConfig(**exp_kwargs)
 
-    if "ckpt_dir" in run_kwargs:
-        run_kwargs["ckpt_dir"] = Path(run_kwargs["ckpt_dir"]).expanduser()
-    if "load_ckpt_name" in run_kwargs:
-        run_kwargs["load_ckpt_name"] = Path(run_kwargs["load_ckpt_name"]).expanduser()
+    run_kwargs = _prepare_dataclass_kwargs(RunOpts, run_kwargs)
+    _expand_path_arg(run_kwargs, "ckpt_dir")
+    _expand_path_arg(run_kwargs, "load_ckpt_name")
+    _expand_path_arg(run_kwargs, "plot_output_dir")
     run_opts = RunOpts(**run_kwargs)
 
     return exp_config, run_opts
@@ -192,14 +216,38 @@ def _train_single_alpha_beta(
     resume_paths: Optional[Dict[int, str]] = None,
     epoch_offset: int = 0,
 ) -> Dict[int, Metrics]:
-    common = config.train_kwargs()
-    common["gpu_ids"] = gpu_ids
-    common["resume_paths"] = resume_paths
-    common["epoch_offset"] = epoch_offset
-    common["eta"] = _resolve_eta(config, alpha=alpha, beta=beta)
-
-    results_by_seed: Dict[int, Metrics] = train_multiseed(alpha=alpha, beta=beta, **common)
-    return results_by_seed
+    train_args = TrainArgs(
+        eta=_resolve_eta(config, alpha=alpha, beta=beta),
+        epochs=config.epochs,
+        beta=beta,
+        m=config.m,
+        init_type=config.init_type,
+        alpha=alpha,
+        lam_fc1=config.lam_fc1,
+        lam_fc2=config.lam_fc2,
+        regularization_scale=config.regularization_scale,
+        use_linearized=config.use_linearized,
+        same_noise=config.same_noise,
+        track_jacobian=config.track_jacobian,
+        jac_probe_size=config.jac_probe_size,
+        device=config.device,
+        track_every=config.track_every,
+        print_every=config.print_every,
+        epoch_offset=epoch_offset,
+        collect_feature_stats=config.collect_feature_stats,
+        noise_free_after_epoch=config.noise_free_after_epoch,
+        early_stop_metric=config.early_stop_metric,
+        early_stop_goal=config.early_stop_goal,
+        early_stop_value=config.early_stop_value,
+    )
+    worker_args = MultiSeedWorkerArgs(
+        n=config.n,
+        random_labels=config.random_labels,
+        reserve_last=config.reserve_last,
+        train=train_args,
+        resume_paths=resume_paths,
+    )
+    return train_multiseed(config.dataset, config.seeds, worker_args, gpu_ids=gpu_ids)
 
 # -------------------------------------------------------------------------- #
 # ------------------------------- eta tuning ------------------------------- #
