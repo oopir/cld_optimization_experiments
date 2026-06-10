@@ -64,7 +64,7 @@ def _feature_stats(model, X_train, A0, A0_norm):
     return feat_rel_dist, feat_cos_dist, feat_gram_lambda
 
 @torch.no_grad()
-def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_norm, data, collect_feature_stats):
+def get_stats(model, params, params0, A0, A0_norm, data, collect_feature_stats):
     """Compute base neural-network metrics while preserving existing metric keys."""
     X_train = data["X_train"]
     X_test = data["X_test"]
@@ -96,7 +96,7 @@ def get_stats(model, params, params0, param_norm0, fc1_norm0, fc2_norm0, A0, A0_
     }
 
 @torch.no_grad()
-def get_linear_stats(model, base_params_dict, lin_params, lin_params0, param_norm0, fc1_norm0, fc2_norm0, data):
+def get_linear_stats(model, base_params_dict, lin_params, lin_params0, data):
     """Compute metrics for the linearized model with the same public key names."""
     X_train = data["X_train"]
     X_test = data["X_test"]
