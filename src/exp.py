@@ -13,7 +13,8 @@ import multiprocessing as mp
 import numpy as np
 import torch
 
-from .config import ExpConfig, RunOpts, save_checkpoint, load_checkpoint
+from .config import ExpConfig, RunOpts, save_checkpoint, load_checkpoint_with_metadata
+from .metric_config import METRIC_SCHEMA_VERSION, resolve_metric_plan
 from .training import MultiSeedWorkerArgs, TrainArgs, train_multiseed
 
 Metrics = Dict[str, Any]
@@ -117,12 +118,73 @@ def _print_exp_config(
     curr = asdict(exp_config)
     prev = asdict(prev_config) if prev_config is not None else {}
     override_keys = set(override_keys or ())
+    tracked_metrics_set = getattr(exp_config, "tracked_metrics", None) is not None
+    legacy_metric_fields = {"track_jacobian", "collect_feature_stats"}
 
     for k, v in curr.items():
+        legacy_note = None
+        if k in legacy_metric_fields:
+            if tracked_metrics_set:
+                legacy_note = "legacy; ignored because tracked_metrics is set"
+            else:
+                legacy_note = "legacy; used only because tracked_metrics is omitted"
+
         if prev_config is not None and k in override_keys and k in prev and prev[k] != v:
-            print(f"  {k}: {v} (previously {prev[k]})")
+            if legacy_note is not None:
+                print(f"  {k}: {v} (previously {prev[k]}; {legacy_note})")
+            else:
+                print(f"  {k}: {v} (previously {prev[k]})")
         else:
-            print(f"  {k}: {v}")
+            suffix = f" ({legacy_note})" if legacy_note is not None else ""
+            print(f"  {k}: {v}{suffix}")
+
+    metric_plan = _resolve_metric_plan_for_config(exp_config)
+    print(f"  effective_tracked_metrics: {list(metric_plan.tracked_metrics)}")
+
+
+def _resolve_metric_plan_for_config(config: ExpConfig):
+    return resolve_metric_plan(
+        tracked_metrics=getattr(config, "tracked_metrics", None),
+        use_linearized=getattr(config, "use_linearized", True),
+        track_jacobian=getattr(config, "track_jacobian", True),
+        collect_feature_stats=getattr(config, "collect_feature_stats", True),
+        early_stop_metric=getattr(config, "early_stop_metric", None),
+    )
+
+
+def _validate_resume_metrics(config: ExpConfig, ckpt_metadata: Mapping[str, Any]) -> ExpConfig:
+    """
+    Refuse resume if the checkpoint lacks metadata or the checkpoint config drifts.
+
+    Loading/plotting old checkpoints is still allowed; only extending them is blocked.
+    Resume uses the checkpoint config as the source of truth, so tracked_metrics
+    from the incoming YAML is not treated as an override.
+    """
+    if not ckpt_metadata.get("has_metric_metadata", False):
+        raise ValueError(
+            "Cannot resume this checkpoint because it does not record tracked_metrics. "
+            "Load/plot it normally, or start a new run with explicit metric metadata."
+        )
+
+    schema_version = ckpt_metadata.get("metric_schema_version")
+    if schema_version != METRIC_SCHEMA_VERSION:
+        raise ValueError(
+            f"Cannot resume checkpoint with metric schema version {schema_version}; "
+            f"expected {METRIC_SCHEMA_VERSION}."
+        )
+
+    ckpt_metrics = tuple(ckpt_metadata.get("tracked_metrics") or ())
+    current_metrics = _resolve_metric_plan_for_config(config).tracked_metrics
+    if ckpt_metrics != current_metrics:
+        raise ValueError(
+            "Cannot alter tracked metrics when resuming a checkpoint.\n"
+            f"  checkpoint tracked_metrics: {list(ckpt_metrics)}\n"
+            f"  current tracked_metrics:    {list(current_metrics)}"
+        )
+
+    if getattr(config, "tracked_metrics", None) is None:
+        config = replace(config, tracked_metrics=list(ckpt_metrics))
+    return config
 
 # -------------------------------------------------------------------------- #
 # ---------------------- work with tuning's eta-table  --------------------- #
@@ -208,6 +270,7 @@ def _train_single_alpha_beta(
     resume_paths: Optional[Dict[int, str]] = None,
     epoch_offset: int = 0,
 ) -> Dict[int, Metrics]:
+    metric_plan = _resolve_metric_plan_for_config(config)
     train_args = TrainArgs(
         eta=_resolve_eta(config, alpha=alpha, beta=beta),
         epochs=config.epochs,
@@ -220,17 +283,16 @@ def _train_single_alpha_beta(
         regularization_scale=config.regularization_scale,
         use_linearized=config.use_linearized,
         same_noise=config.same_noise,
-        track_jacobian=config.track_jacobian,
         jac_probe_size=config.jac_probe_size,
         device=config.device,
         track_every=config.track_every,
         print_every=config.print_every,
         epoch_offset=epoch_offset,
-        collect_feature_stats=config.collect_feature_stats,
         noise_free_after_epoch=config.noise_free_after_epoch,
         early_stop_metric=config.early_stop_metric,
         early_stop_goal=config.early_stop_goal,
         early_stop_value=config.early_stop_value,
+        metric_plan=metric_plan,
     )
     worker_args = MultiSeedWorkerArgs(
         n=config.n,
@@ -267,6 +329,8 @@ def _tune_eta_for_pair(
     cfg.early_stop_metric = None
     cfg.early_stop_value = None
     cfg.early_stop_goal = "min"
+    if cfg.tracked_metrics is not None and metric_name not in cfg.tracked_metrics:
+        cfg.tracked_metrics = list(cfg.tracked_metrics) + [metric_name]
 
     hist_key = f"{metric_name}_hist"
     best_eta: Optional[float] = None
@@ -630,7 +694,7 @@ def run_exp(config: ExpConfig, run_opts: RunOpts, gpu_ids: List[int],) -> Tuple[
     if run_opts.load_ckpt:
         # load ckpt
         load_ckpt_path = run_opts.ckpt_dir / run_opts.load_ckpt_name
-        base_results, base_config = load_checkpoint(str(load_ckpt_path))
+        base_results, base_config, ckpt_metadata = load_checkpoint_with_metadata(str(load_ckpt_path))
         print(f"Loaded checkpoint: {load_ckpt_path}")
         
         # resume run if needed
@@ -638,7 +702,11 @@ def run_exp(config: ExpConfig, run_opts: RunOpts, gpu_ids: List[int],) -> Tuple[
             if run_opts.new_total_epochs is None:
                 raise ValueError("new_total_epochs must be set when resume_from_ckpt is True")
             
+            # Resume starts from the checkpoint config. The incoming YAML only changes fields
+            # explicitly listed in run.config_overrides, and tracked_metrics is intentionally
+            # not an overrideable field.
             exp_config = _apply_config_overrides(base_config, config, run_opts.config_overrides)
+            exp_config = _validate_resume_metrics(exp_config, ckpt_metadata)
 
             override_keys = (run_opts.config_overrides or {})
             _print_exp_config(exp_config, prev_config=base_config, override_keys=override_keys)
@@ -652,6 +720,7 @@ def run_exp(config: ExpConfig, run_opts: RunOpts, gpu_ids: List[int],) -> Tuple[
             )
         # otherwise, go with existing ckpt data
         else:
+            # Old checkpoints may not have metric metadata; loading/plotting them is still allowed.
             exp_config = base_config
             _print_exp_config(exp_config)
             results = base_results 

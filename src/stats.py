@@ -4,22 +4,7 @@ import torch.nn.functional as F
 
 from .model import loss_fn
 from .linearized import linearized_forward, compute_param_jacobians
-
-BASE_METRIC_NAMES = [
-    "train_loss",
-    "train_acc",
-    "test_acc",
-    "param_dist",
-    "feat_rel_dist",
-    "feat_cos_dist",
-    "feat_gram_lambda",
-]
-LIN_METRIC_NAMES = [
-    "lin_train_loss",
-    "lin_train_acc",
-    "lin_test_acc",
-    "lin_param_dist",
-]
+from .metric_config import BASE_METRIC_NAMES, LIN_METRIC_NAMES
 
 def _param_dist(params, params0):
     """Compute parameter displacement from the matching initialization tensors."""
@@ -45,83 +30,88 @@ def _classification_metrics(model, X, y, loss_targets=None, batch_size=1024):
     loss = total_loss / n if loss_targets is not None else None
     return acc, loss
 
-def _feature_stats(model, X_train, A0, A0_norm):
-    """Compute hidden-feature drift metrics used by the experiment plots and bounds."""
+def _feature_stats(model, X_train, A0, A0_norm, metric_names):
+    """Compute only the requested hidden-feature drift metrics."""
+    stats = {}
     A_t = torch.tanh(model.fc1(X_train))
-    feat_rel_dist = (A_t - A0).norm().item() / (A0_norm + 1e-12)
 
-    cos_sim = F.cosine_similarity(A_t.view(-1), A0.view(-1), dim=0).item()
-    feat_cos_dist = 1.0 - cos_sim
+    if "feat_rel_dist" in metric_names:
+        stats["feat_rel_dist"] = (A_t - A0).norm().item() / (A0_norm + 1e-12)
 
-    A_Gram = A_t @ A_t.T
-    A_Gram = 0.5 * (A_Gram + A_Gram.T)
-    try:
-        feat_gram_lambda = torch.linalg.eigvalsh(A_Gram)[0].item()
-    except Exception:
-        print("Numerical instability occurred when computing lambda_min of feature matrix. Defaulting to nan.")
-        feat_gram_lambda = float("nan")
+    if "feat_cos_dist" in metric_names:
+        cos_sim = F.cosine_similarity(A_t.view(-1), A0.view(-1), dim=0).item()
+        stats["feat_cos_dist"] = 1.0 - cos_sim
 
-    return feat_rel_dist, feat_cos_dist, feat_gram_lambda
+    if "feat_gram_lambda" in metric_names:
+        A_Gram = A_t @ A_t.T
+        A_Gram = 0.5 * (A_Gram + A_Gram.T)
+        try:
+            stats["feat_gram_lambda"] = torch.linalg.eigvalsh(A_Gram)[0].item()
+        except Exception:
+            print("Numerical instability occurred when computing lambda_min of feature matrix. Defaulting to nan.")
+            stats["feat_gram_lambda"] = float("nan")
+
+    return stats
 
 @torch.no_grad()
-def get_stats(model, params, params0, A0, A0_norm, data, collect_feature_stats):
-    """Compute base neural-network metrics while preserving existing metric keys."""
+def get_stats(model, params, params0, A0, A0_norm, data, metric_plan):
+    """Compute the requested NN stats."""
     X_train = data["X_train"]
     X_test = data["X_test"]
     y_train = data["y_train"]
     y_test = data["y_test"]
+    metrics = metric_plan.compute_metrics
+    stats = {}
 
-    # MSE classification runs use one-hot targets; regression-style runs can omit them.
-    train_targets = data.get("y_train_one_hot", y_train)
-    train_acc, train_loss = _classification_metrics(model, X_train, y_train, train_targets)
-    test_acc, _ = _classification_metrics(model, X_test, y_test)
+    if "train_acc" in metrics or "train_loss" in metrics:
+        # MSE classification runs use one-hot targets; regression-style runs can omit them.
+        train_targets = data.get("y_train_one_hot", y_train)
+        train_acc, train_loss = _classification_metrics(model, X_train, y_train, train_targets)
+        if "train_acc" in metrics:
+            stats["train_acc"] = train_acc
+        if "train_loss" in metrics:
+            stats["train_loss"] = train_loss
 
-    param_dist = _param_dist(params, params0)
-    
-    if collect_feature_stats:
-        feat_rel_dist, feat_cos_dist, feat_gram_lambda = _feature_stats(model, X_train, A0, A0_norm)
-    else:
-        feat_rel_dist = float("nan")
-        feat_cos_dist = float("nan")
-        feat_gram_lambda = float("nan")
+    if "test_acc" in metrics:
+        test_acc, _ = _classification_metrics(model, X_test, y_test)
+        stats["test_acc"] = test_acc
 
-    return {
-        "train_loss": train_loss,
-        "train_acc": train_acc,
-        "test_acc": test_acc,
-        "param_dist": param_dist,
-        "feat_rel_dist": feat_rel_dist,
-        "feat_cos_dist": feat_cos_dist,
-        "feat_gram_lambda": feat_gram_lambda,
-    }
+    if "param_dist" in metrics:
+        stats["param_dist"] = _param_dist(params, params0)
+
+    if metric_plan.needs_feature_activations:
+        stats.update(_feature_stats(model, X_train, A0, A0_norm, metrics))
+
+    return stats
 
 @torch.no_grad()
-def get_linear_stats(model, base_params_dict, lin_params, lin_params0, data):
-    """Compute metrics for the linearized model with the same public key names."""
+def get_linear_stats(model, base_params_dict, lin_params, lin_params0, data, metric_plan):
+    """Compute the requested linearized model stats."""
     X_train = data["X_train"]
     X_test = data["X_test"]
     y_train = data["y_train"]
     y_test = data["y_test"]
+    metrics = metric_plan.compute_metrics
+    stats = {}
 
-    outputs_train = linearized_forward(model, base_params_dict, lin_params, X_train)
-    pred_train = outputs_train.argmax(dim=1)
-    train_acc = (pred_train == y_train).float().mean().item()
+    if "lin_train_loss" in metrics or "lin_train_acc" in metrics:
+        outputs_train = linearized_forward(model, base_params_dict, lin_params, X_train)
+        if "lin_train_acc" in metrics:
+            pred_train = outputs_train.argmax(dim=1)
+            stats["lin_train_acc"] = (pred_train == y_train).float().mean().item()
+        if "lin_train_loss" in metrics:
+            # Same target convention as get_stats: prefer one-hot labels when present.
+            stats["lin_train_loss"] = loss_fn(outputs_train, data.get("y_train_one_hot", y_train)).item()
 
-    outputs_test = linearized_forward(model, base_params_dict, lin_params, X_test)
-    pred_test = outputs_test.argmax(dim=1)
-    test_acc = (pred_test == y_test).float().mean().item()
+    if "lin_test_acc" in metrics:
+        outputs_test = linearized_forward(model, base_params_dict, lin_params, X_test)
+        pred_test = outputs_test.argmax(dim=1)
+        stats["lin_test_acc"] = (pred_test == y_test).float().mean().item()
 
-    # Same target convention as get_stats: prefer one-hot labels when present.
-    train_loss = loss_fn(outputs_train, data.get("y_train_one_hot", y_train)).item()
+    if "lin_param_dist" in metrics:
+        stats["lin_param_dist"] = _param_dist(lin_params, lin_params0)
 
-    param_dist = _param_dist(lin_params, lin_params0)
-    
-    return {
-        "lin_train_loss": train_loss,
-        "lin_train_acc": train_acc,
-        "lin_test_acc": test_acc,
-        "lin_param_dist": param_dist,
-    }
+    return stats
 
 @torch.no_grad()
 def get_nn_lin_param_dist(params, lin_params, normalize_by=None, eps=1e-12):

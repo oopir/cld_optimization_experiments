@@ -4,6 +4,7 @@ from typing import Optional, List
 import torch
 
 from . import metric_checkpoints  # noqa: F401; keep old checkpoint classes importable for torch.load
+from .metric_config import METRIC_SCHEMA_VERSION, resolve_metric_plan
 
 @dataclass
 class ExpConfig:
@@ -37,10 +38,11 @@ class ExpConfig:
     # stats
     use_linearized: bool = True
     same_noise: bool = False
-    track_jacobian: bool = True
+    tracked_metrics: Optional[List[str]] = None
+    track_jacobian: bool = True # Legacy metric shim: only used to build default metrics when tracked_metrics is omitted.
     jac_probe_size: int = 10
     track_every: int = 10
-    print_every: int = 100
+    print_every: int = 100 # Legacy metric shim: only used to build default metrics when tracked_metrics is omitted.
     collect_feature_stats: bool = True
 
 
@@ -57,7 +59,20 @@ class RunOpts:
 
 
 def save_checkpoint(path, results, config: ExpConfig):
-    payload = {"type": "exp1", "config": config, "results": results}
+    metric_plan = resolve_metric_plan(
+        tracked_metrics=getattr(config, "tracked_metrics", None),
+        use_linearized=getattr(config, "use_linearized", True),
+        track_jacobian=getattr(config, "track_jacobian", True),
+        collect_feature_stats=getattr(config, "collect_feature_stats", True),
+        early_stop_metric=getattr(config, "early_stop_metric", None),
+    )
+    payload = {
+        "type": "exp1",
+        "config": config,
+        "metric_schema_version": METRIC_SCHEMA_VERSION,
+        "tracked_metrics": list(metric_plan.tracked_metrics),
+        "results": results,
+    }
     torch.save(payload, path)
 
 def patch_loaded_config(config):
@@ -86,12 +101,25 @@ def patch_loaded_config(config):
 
     return config
 
-def load_checkpoint(path):
+def _load_checkpoint_payload(path):
     payload = torch.load(path, map_location="cpu", weights_only=False)
 
     payload_type = payload.get("type", "exp1") # 2nd argument "tolerates" old ckpts w/o "type" field
     if payload_type != "exp1":
         raise ValueError(f"Unexpected checkpoint type: {payload_type}")
 
-    config = patch_loaded_config(payload["config"])
-    return payload["results"], config
+    payload["config"] = patch_loaded_config(payload["config"])
+    return payload
+
+def load_checkpoint(path):
+    payload = _load_checkpoint_payload(path)
+    return payload["results"], payload["config"]
+
+def load_checkpoint_with_metadata(path):
+    payload = _load_checkpoint_payload(path)
+    metadata = {
+        "metric_schema_version": payload.get("metric_schema_version"),
+        "tracked_metrics": payload.get("tracked_metrics"),
+        "has_metric_metadata": "tracked_metrics" in payload,
+    }
+    return payload["results"], payload["config"], metadata
