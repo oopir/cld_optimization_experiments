@@ -36,8 +36,6 @@ class BaseModelVars:
     lam_tensors: list
     params0: list
     param_norm0: float
-    fc1_norm0: float
-    fc2_norm0: float
     W0: torch.Tensor
 
 @dataclass
@@ -47,9 +45,6 @@ class LinearizationVars:
     params: list
     lam_tensors: list
     params0: list
-    param_norm0: float
-    fc1_norm0: float
-    fc2_norm0: float
 
 @dataclass
 class TrainArgs:
@@ -146,34 +141,25 @@ def _init_base_model_vars(d_in, d_out, m, init_type, alpha, device, lam_fc1, lam
     params0 = [p.detach().clone() for p in params]
     with torch.no_grad():
         param_norm0 = torch.sqrt(sum(p.pow(2).sum() for p in params0)).item()
-        fc1_norm0 = torch.sqrt(params0[0].pow(2).sum()).item()
-        fc2_norm0 = torch.sqrt(params0[1].pow(2).sum()).item()
 
     W0 = model.fc1.weight.detach().clone()
 
-    return BaseModelVars(model, params, lam_tensors, params0, param_norm0, fc1_norm0, fc2_norm0, W0)
+    return BaseModelVars(model, params, lam_tensors, params0, param_norm0, W0)
 
 def _init_linearization_vars(model, params0, lam_tensors):
     """Initialize the linearized model around the NN initialization."""
 
     base_params_dict, lin_params, lin_lam_tensors = init_linearization(model, params0, lam_tensors)
     lin_params0 = [p.detach().clone() for p in lin_params]
-    with torch.no_grad():
-        lin_param_norm0 = torch.sqrt(sum(p.pow(2).sum() for p in lin_params0)).item()
-        lin_fc1_norm0 = torch.sqrt(lin_params0[0].pow(2).sum()).item()
-        lin_fc2_norm0 = torch.sqrt(lin_params0[1].pow(2).sum()).item()
 
     return LinearizationVars(
         base_params_dict,
         lin_params,
         lin_lam_tensors,
         lin_params0,
-        lin_param_norm0,
-        lin_fc1_norm0,
-        lin_fc2_norm0,
     )
 
-def _init_jacobian_track_vars(d, d_out, m, init_type, alpha, device, model, X_train, probe_bs):
+def _init_jacobian_track_vars(d, d_out, m, init_type, alpha, device, model):
     """Prepare an initialization copy for full-dataset NTK/Jacobian drift tracking."""
     model_at_init = TwoLayerNet(d_in=d, m=m, d_out=d_out, init_type=init_type, alpha=alpha).to(device)
     model_at_init.load_state_dict(model.state_dict())
@@ -282,9 +268,6 @@ def _record_linear_metrics(metrics, base, lin, data):
         lin.base_params_dict,
         lin.params,
         lin.params0,
-        lin.param_norm0,
-        lin.fc1_norm0,
-        lin.fc2_norm0,
         data,
     )
     for name in LIN_METRIC_NAMES:
@@ -313,9 +296,6 @@ def _record_epoch_metrics(
         base.model,
         base.params,
         base.params0,
-        base.param_norm0,
-        base.fc1_norm0,
-        base.fc2_norm0,
         A0,
         A0_norm,
         data,
@@ -412,9 +392,6 @@ def train(data, args, resume_state=None):
         base.model,
         base.params,
         base.params0,
-        base.param_norm0,
-        base.fc1_norm0,
-        base.fc2_norm0,
         A0,
         A0_norm,
         data,
