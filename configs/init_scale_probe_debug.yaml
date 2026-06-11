@@ -1,0 +1,50 @@
+probe:
+  dataset: mnist
+  # random_labels: false
+  # reserve_last: 0
+  negative_classes: [0, 1, 2, 3, 4]
+  positive_classes: [5, 6, 7, 8, 9]
+
+  n_values: [1000, 2000, 4000, 8000, 16000, 32000, 62000]
+  m_values: [50, 150, 500, 1500, 5000, 15000]
+  # alpha_values: [0.1, 1.0]
+  init_type: standard
+
+  data_seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  init_seeds: null
+  num_inits: 100
+  init_seed_start: 10000
+  report_data_seed: 0
+
+  device: cuda
+  batch_size: 10000
+  jacobian_batch_size: 1000
+  parallel: true
+  # gpu_ids: null
+  init_chunk_size: 25
+  adaptive_gpu_packing: true
+  gpu_memory_safety_fraction: 0.9
+  # gpu_reserved_memory_mb: 1000
+  # max_workers_per_gpu: 8
+  # retry_on_oom: true
+  # oom_shrink_factor: 0.5
+  min_batch_size: 1
+
+  progress_interval_seconds: null  # null/0 prints one start+finish per (n, m, alpha); positive seconds adds active snapshots.
+  progress_detail: grid            # summary | grid
+
+  tracked_metrics: null  # null tracks all metrics; to track only plotted metrics, copy this list here.
+  plot_metrics:          # plot_metrics has to be a subset of tracked_metrics (unless it is null)
+    - mean_abs_output
+    # - mean_preactivation_norm
+    - mean_abs_residual
+    - empirical_loss
+    - mean_output_grad_norm_fc1
+    - mean_output_grad_norm_fc2
+    - empirical_loss_grad_norm
+  plot_format: combined  # combined | individual | both
+  plot_facets: "off"       # auto | "off"
+  plot_facet_threshold: 1
+  plot_heatmaps: true
+
+  output_dir: plots/init_scale_probe_debug
