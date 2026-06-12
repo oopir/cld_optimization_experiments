@@ -102,8 +102,12 @@ def _varying_axes(summary_rows: Sequence[Mapping[str, Any]]) -> Tuple[str, ...]:
 
 
 def _line_plot_axes(summary_rows: Sequence[Mapping[str, Any]]) -> Tuple[str, ...]:
-    """Return varying line-plot x-axes, temporarily excluding n."""
-    return tuple(axis for axis in _varying_axes(summary_rows) if axis != "n")
+    """Return varying line-plot x-axes, temporarily excluding n and non-finite axes."""
+    return tuple(
+        axis
+        for axis in _varying_axes(summary_rows)
+        if axis != "n" and _axis_has_finite_values(summary_rows, axis)
+    )
 
 
 # -------------------------------------------------------------------------- #
@@ -124,6 +128,7 @@ def plot_probe_summaries(
         return paths
 
     varying_axes = _varying_axes(summary_rows)
+    heatmap_axes = varying_axes if len(varying_axes) <= 3 else ()
     for metric_name in config.plot_metrics:
         if f"{metric_name}_mean" not in summary_rows[0]:
             continue
@@ -140,7 +145,7 @@ def plot_probe_summaries(
                 metric_name,
                 line_axes,
                 path,
-                heatmap_axes=varying_axes,
+                heatmap_axes=heatmap_axes,
                 data_seed_summary_rows=data_seed_rows,
                 data_seed_axes=data_seed_axes,
             )
@@ -152,8 +157,8 @@ def plot_probe_summaries(
                 _plot_metric_axis(summary_rows, config, metric_name, axis, path)
                 paths[f"plot_{metric_name}_vs_{axis}"] = path
 
-        if config.plot_heatmaps and len(varying_axes) >= 2 and config.plot_format in {"individual", "both"}:
-            paths.update(_plot_metric_heatmaps(summary_rows, metric_name, varying_axes, output_dir))
+        if config.plot_heatmaps and len(heatmap_axes) >= 2 and config.plot_format in {"individual", "both"}:
+            paths.update(_plot_metric_heatmaps(summary_rows, metric_name, heatmap_axes, output_dir))
 
     return paths
 
@@ -583,6 +588,17 @@ def _unique_values(rows: Sequence[Mapping[str, Any]], axis: Optional[str]) -> Tu
     if axis is None:
         return (None,)
     return tuple(sorted({row[axis] for row in rows}, key=_sort_key))
+
+
+def _axis_has_finite_values(rows: Sequence[Mapping[str, Any]], axis: str) -> bool:
+    """Return False for axes like beta when an infinity value would break line plotting."""
+    values = []
+    for row in rows:
+        try:
+            values.append(float(row[axis]))
+        except (TypeError, ValueError):
+            return False
+    return bool(values) and all(math.isfinite(value) for value in values)
 
 
 def _group_label(axes: Sequence[str], key: Sequence[Any]) -> str:

@@ -5,12 +5,15 @@ probe:
   negative_classes: [0, 1, 2, 3, 4]
   positive_classes: [5, 6, 7, 8, 9]
 
-  n_values: [1000, 2000, 4000, 8000, 16000, 32000, 62000]
-  m_values: [50, 150, 500, 1500, 5000, 15000]
+  n_values: [1000, 2000, 4000, 8000]
+  m_values: [50, 150, 500, 1500]
   # alpha_values: [0.1, 1.0]
+  beta_values: [10, 50, 250, .inf]
+  training_step_values: [0, 1, 10, 50]
+  eta: 0.001
   init_type: standard
 
-  data_seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  data_seeds: [0, 1, 2, 3, 4, 5]
   init_seeds: null
   num_inits: 100
   init_seed_start: 10000
@@ -30,13 +33,13 @@ probe:
   # oom_shrink_factor: 0.5
   min_batch_size: 1
 
-  progress_interval_seconds: null  # null/0 prints one start+finish per (n, m, alpha); positive seconds adds active snapshots.
+  progress_interval_seconds: null  # null/0 prints one start+finish per (n, m, alpha, beta); positive seconds adds active snapshots.
   progress_detail: grid            # summary | grid
 
   tracked_metrics: null  # null tracks all metrics; to track only plotted metrics, copy this list here.
   plot_metrics:          # plot_metrics has to be a subset of tracked_metrics (unless it is null)
     - mean_abs_output
-    # - mean_preactivation_norm
+    - mean_preactivation_norm
     - mean_abs_residual
     - empirical_loss
     - mean_output_grad_norm_fc1

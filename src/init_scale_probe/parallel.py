@@ -14,7 +14,8 @@ import torch
 from ..data import DATASET_METADATA, load_binary_classification_data
 from .core import (
     InitScaleProbeConfig,
-    _row_for_initialization,
+    _rows_for_trained_initialization,
+    sort_probe_rows,
     summarize_data_seed_rows,
     summarize_rows,
     write_csv,
@@ -31,13 +32,14 @@ class WorkItem:
     data_seed: int
     m: int
     alpha: float
+    beta: float
     init_seeds: Tuple[int, ...]
     batch_size: int
     jacobian_batch_size: int
 
     @property
-    def profile_fields(self) -> Tuple[int, int, int]:
-        """Return the key used to share calibration data across alpha/init chunks."""
+    def profile_fields(self) -> Tuple[int, int]:
+        """Return the key used to share calibration data across alpha/beta/init chunks."""
         return (self.n, self.m)
 
 
@@ -72,11 +74,7 @@ def run_probe_parallel(config: InitScaleProbeConfig):
         rows = _run_items(config, items, slots)
 
     # Aggregate in a deterministic order so parallel and serial CSVs are comparable.
-    rows = [dict(row) for row in sorted(
-            rows,
-            key=lambda row: (row["n"], row["data_seed"], row["m"], row["alpha"], row["init_seed"]),
-        )
-    ]
+    rows = sort_probe_rows(rows)
     summary_rows = summarize_rows(rows, config.tracked_metrics or [], report_data_seed=config.report_data_seed)
     data_seed_summary_rows = summarize_data_seed_rows(rows, config.tracked_metrics or [])
 
@@ -110,7 +108,7 @@ def _chunks(values: Sequence[int], chunk_size: int) -> Iterable[Sequence[int]]:
 def _build_work_items(config: InitScaleProbeConfig) -> List[WorkItem]:
     """
     Create init-seed chunks for every point in the configured sweep grid.
-    A WorkItem keeps `(n, data_seed, m, alpha)` and groups several init seeds.
+    A WorkItem keeps `(n, data_seed, m, alpha, beta)` and groups several init seeds.
     """
     items = []
     init_seeds = list(config.init_seeds or [])
@@ -118,18 +116,20 @@ def _build_work_items(config: InitScaleProbeConfig) -> List[WorkItem]:
         for data_seed in config.data_seeds:
             for m in config.m_values:
                 for alpha in config.alpha_values:
-                    for seed_chunk in _chunks(init_seeds, config.init_chunk_size):
-                        items.append(
-                            WorkItem(
-                                n=n,
-                                data_seed=data_seed,
-                                m=m,
-                                alpha=alpha,
-                                init_seeds=tuple(seed_chunk),
-                                batch_size=config.batch_size,
-                                jacobian_batch_size=config.jacobian_batch_size,
+                    for beta in config.beta_values:
+                        for seed_chunk in _chunks(init_seeds, config.init_chunk_size):
+                            items.append(
+                                WorkItem(
+                                    n=n,
+                                    data_seed=data_seed,
+                                    m=m,
+                                    alpha=alpha,
+                                    beta=beta,
+                                    init_seeds=tuple(seed_chunk),
+                                    batch_size=config.batch_size,
+                                    jacobian_batch_size=config.jacobian_batch_size,
+                                )
                             )
-                        )
     return items
 
 # -------------------------------------------------------------------------- #
@@ -211,7 +211,7 @@ def _profile_items(config: InitScaleProbeConfig, items: Sequence[WorkItem], devi
 
     start_time = time.monotonic()
     print(f"Profiling starts...")
-    representatives: Dict[Tuple[int, int, int], WorkItem] = {}
+    representatives: Dict[Tuple[int, int], WorkItem] = {}
     for item in items:
         if item.profile_fields not in representatives:
             representatives[item.profile_fields] = replace(item, init_seeds=(item.init_seeds[0],))
@@ -219,8 +219,10 @@ def _profile_items(config: InitScaleProbeConfig, items: Sequence[WorkItem], devi
     profile_items = list(representatives.values())
     profile_slots = _cuda_slots(config, profile_items, device)
 
-    profile_batches: Dict[Tuple[int, int, int], Tuple[int, int]] = {}
-    for item, result in _run_profile_items(config, profile_items, profile_slots):
+    profile_step_values = [0] if max(config.training_step_values) <= 0 else [0, 1]
+    profile_config = replace(config, training_step_values=profile_step_values)
+    profile_batches: Dict[Tuple[int, int], Tuple[int, int]] = {}
+    for item, result in _run_profile_items(profile_config, profile_items, profile_slots):
         # `_run_item_with_retries` returns a result dict containing `ok`, `rows`,
         # `peak_mb`, `batch_size`, and `jacobian_batch_size`. For ok=True, the
         # returned sizes are the quantities that actually worked.
@@ -525,26 +527,26 @@ class _RunTracker:
         self.last_snapshot_time = now
 
 
-def _grid_key(item: WorkItem) -> Tuple[int, int, float]:
+def _grid_key(item: WorkItem) -> Tuple[int, int, float, float]:
     """Return the tuple used for progress counts."""
-    return (int(item.n), int(item.m), float(item.alpha))
+    return (int(item.n), int(item.m), float(item.alpha), float(item.beta))
 
 
-def _item_key(item: WorkItem) -> Tuple[int, int, float, int, Tuple[int, ...]]:
+def _item_key(item: WorkItem) -> Tuple[int, int, float, float, int, Tuple[int, ...]]:
     """Return a unique key for a scheduled work/profiling item."""
     return (*_grid_key(item), int(item.data_seed), tuple(int(seed) for seed in item.init_seeds))
 
 
-def _sort_grid_key(key: Tuple[int, int, float]) -> Tuple[int, int, float]:
-    """Sort progress keys by the visible `(n, m, alpha)` tuple."""
-    n, m, alpha = key
-    return (n, m, alpha)
+def _sort_grid_key(key: Tuple[int, int, float, float]) -> Tuple[int, int, float, float]:
+    """Sort progress keys by the visible `(n, m, alpha, beta)` tuple."""
+    n, m, alpha, beta = key
+    return (n, m, alpha, beta)
 
 
-def _format_grid_key(key: Tuple[int, int, float]) -> str:
+def _format_grid_key(key: Tuple[int, int, float, float]) -> str:
     """Format the progress tuple without seed/data-seed detail."""
-    n, m, alpha = key
-    return f"n={n:>5} m={m:>5} alpha={_format_value(alpha)}"
+    n, m, alpha, beta = key
+    return f"n={n:>5} m={m:>5} alpha={_format_value(alpha)} beta={_format_value(beta)}"
 
 
 def _format_item(item: WorkItem) -> str:
@@ -632,8 +634,8 @@ def _run_item_with_retries(config: InitScaleProbeConfig, item: WorkItem, device:
 def _run_one_item(config: InitScaleProbeConfig, item: WorkItem, device: str) -> Dict[str, Any]:
     """
     Load data on one device and evaluate every init seed in the work item.
-    data_seed is used here; init_seeds are fed to `_row_for_initialization`
-    in a loop.
+    data_seed is used here; init_seeds each produce one trajectory over the
+    configured training-step checkpoints.
     """
     try:
         if device.startswith("cuda"):
@@ -655,19 +657,21 @@ def _run_one_item(config: InitScaleProbeConfig, item: WorkItem, device: str) -> 
             reserve_last=worker_config.reserve_last,
         )
 
-        rows = [
-            _row_for_initialization(
-                worker_config,
-                binary_data,
-                n=item.n,
-                m=item.m,
-                alpha=item.alpha,
-                data_seed=item.data_seed,
-                init_seed=init_seed,
-                device=device,
+        rows = []
+        for init_seed in item.init_seeds:
+            rows.extend(
+                _rows_for_trained_initialization(
+                    worker_config,
+                    binary_data,
+                    n=item.n,
+                    m=item.m,
+                    alpha=item.alpha,
+                    beta=item.beta,
+                    data_seed=item.data_seed,
+                    init_seed=init_seed,
+                    device=device,
+                )
             )
-            for init_seed in item.init_seeds
-        ]
 
         peak_mb = torch.cuda.max_memory_reserved() / MB if device.startswith("cuda") else None
         if device.startswith("cuda"):
@@ -709,6 +713,6 @@ def _checked_worker_result(result: Mapping[str, Any], item: WorkItem) -> List[Di
     raise RuntimeError(
         "Probe worker failed for "
         f"n={item.n}, data_seed={item.data_seed}, m={item.m}, "
-        f"alpha={item.alpha}, init_seeds={list(item.init_seeds)}: "
+        f"alpha={item.alpha}, beta={item.beta}, init_seeds={list(item.init_seeds)}: "
         f"{result.get('error', 'unknown error')}"
     )

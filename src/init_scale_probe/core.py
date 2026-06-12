@@ -5,68 +5,38 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import csv
 import math
-import random
 
 import numpy as np
 import torch
 
 from ..data import load_binary_classification_data
-from ..model import TwoLayerNet
+from ..stats import (
+    BINARY_ALL_METRICS,
+    BINARY_CORE_METRICS,
+    BINARY_GRADIENT_METRICS,
+    BINARY_LAYERWISE_METRICS,
+    BINARY_PARAMETER_METRICS,
+    get_binary_probe_stats,
+)
+from ..training import run_full_batch_training_checkpoints, seed_training_run
 
 # -------------------------------------------------------------------------- #
 # ------------------------------- constants -------------------------------- #
 # -------------------------------------------------------------------------- #
 
-CORE_METRICS = (
-    "mean_abs_output",
-    "mean_output_sq",
-    "mean_preactivation_norm",
-    "mean_abs_residual",
-    "empirical_loss",
-    "mean_output_grad_norm",
-    "mean_output_grad_norm_sq",
-    "empirical_loss_grad_norm",
-)
+CORE_METRICS = BINARY_CORE_METRICS
+LAYERWISE_METRICS = BINARY_LAYERWISE_METRICS
+PARAMETER_METRICS = BINARY_PARAMETER_METRICS
+ALL_METRICS = BINARY_ALL_METRICS
+GRADIENT_METRICS = BINARY_GRADIENT_METRICS
+SWEEP_AXES = ("n", "m", "alpha", "beta", "training_steps")
 
-FORWARD_METRICS = (
-    "mean_abs_output",
-    "mean_output_sq",
-    "mean_preactivation_norm",
-    "mean_abs_residual",
-    "empirical_loss",
-)
 
-OUTPUT_GRAD_METRICS = (
-    "mean_output_grad_norm",
-    "mean_output_grad_norm_sq",
-    "mean_output_grad_norm_fc1",
-    "mean_output_grad_norm_sq_fc1",
-    "mean_output_grad_norm_fc2",
-    "mean_output_grad_norm_sq_fc2",
-)
-EMPIRICAL_LOSS_GRAD_METRICS = (
-    "empirical_loss_grad_norm",
-    "empirical_loss_grad_norm_fc1",
-    "empirical_loss_grad_norm_fc2",
-)
-
-LAYERWISE_METRICS = (
-    "mean_output_grad_norm_fc1",
-    "mean_output_grad_norm_sq_fc1",
-    "mean_output_grad_norm_fc2",
-    "mean_output_grad_norm_sq_fc2",
-    "empirical_loss_grad_norm_fc1",
-    "empirical_loss_grad_norm_fc2",
-)
-
-PARAMETER_METRICS = (
-    "fc1_weight_fro_norm",
-    "fc1_weight_spectral_norm",
-)
-
-ALL_METRICS = CORE_METRICS + LAYERWISE_METRICS + PARAMETER_METRICS
-GRADIENT_METRICS = OUTPUT_GRAD_METRICS + EMPIRICAL_LOSS_GRAD_METRICS
-SWEEP_AXES = ("n", "m", "alpha")
+def _parse_beta_value(value: Any) -> float:
+    """Parse YAML/CSV beta values, accepting string spellings of infinity."""
+    if isinstance(value, str) and value.strip().lower() in {".inf", "inf", "+inf", "infinity", "+infinity"}:
+        return float("inf")
+    return float(value)
 
 # -------------------------------------------------------------------------- #
 # ------------------------------- config ----------------------------------- #
@@ -84,6 +54,9 @@ class InitScaleProbeConfig:
     n_values: List[int] = field(default_factory=lambda: [10])
     m_values: List[int] = field(default_factory=lambda: [10])
     alpha_values: List[float] = field(default_factory=lambda: [1.0])
+    beta_values: List[float] = field(default_factory=lambda: [float("inf")])
+    training_step_values: List[int] = field(default_factory=lambda: [0])
+    eta: float = 1.0
     init_type: str = "alpha"
     # randomness
     data_seeds: List[int] = field(default_factory=lambda: [0])
@@ -122,6 +95,9 @@ class InitScaleProbeConfig:
         self.n_values = [int(x) for x in self.n_values]
         self.m_values = [int(x) for x in self.m_values]
         self.alpha_values = [float(x) for x in self.alpha_values]
+        self.beta_values = [_parse_beta_value(x) for x in self.beta_values]
+        self.training_step_values = sorted({int(x) for x in self.training_step_values})
+        self.eta = float(self.eta)
         self.data_seeds = [int(x) for x in self.data_seeds]
         self.num_inits = int(self.num_inits)
         self.init_seed_start = int(self.init_seed_start)
@@ -159,6 +135,16 @@ class InitScaleProbeConfig:
             raise ValueError("m_values must be non-empty.")
         if not self.alpha_values:
             raise ValueError("alpha_values must be non-empty.")
+        if not self.beta_values:
+            raise ValueError("beta_values must be non-empty.")
+        if not self.training_step_values:
+            raise ValueError("training_step_values must be non-empty.")
+        if any(step < 0 for step in self.training_step_values):
+            raise ValueError("training_step_values must be non-negative.")
+        if any((not math.isinf(beta)) and beta <= 0 for beta in self.beta_values):
+            raise ValueError("beta_values must be positive or infinity.")
+        if self.eta < 0:
+            raise ValueError("eta must be non-negative.")
         if not self.data_seeds:
             raise ValueError("data_seeds must be non-empty.")
         if self.init_seeds is None:
@@ -232,202 +218,32 @@ class InitScaleProbeConfig:
             )
 
 # -------------------------------------------------------------------------- #
-# --------------------------- metric computation --------------------------- #
-# -------------------------------------------------------------------------- #
-
-@torch.no_grad()
-def _compute_forward_metrics(
-    model: TwoLayerNet,
-    X: torch.Tensor,
-    y: torch.Tensor,
-    batch_size: int,
-    metric_names: Sequence[str],
-) -> Dict[str, float]:
-    metric_names = set(metric_names)
-    n = X.shape[0]
-    totals = {name: 0.0 for name in metric_names}
-    output_metric_names = {"mean_abs_output", "mean_output_sq", "mean_abs_residual", "empirical_loss"}
-    needs_output = bool(metric_names & output_metric_names)
-
-    for start in range(0, n, batch_size):
-        end = min(start + batch_size, n)
-        xb = X[start:end]
-        yb = y[start:end]
-
-        z = model.fc1(xb)
-        if "mean_preactivation_norm" in metric_names:
-            totals["mean_preactivation_norm"] += float(torch.linalg.vector_norm(z, dim=1).sum().item())
-        if not needs_output:
-            continue
-
-        out = model.fc2(torch.tanh(z))
-        if model.init_type == "alpha" and model.alpha != 0:
-            out = out / model.alpha
-        out = out.view(-1, 1)
-
-        if "mean_abs_output" in metric_names:
-            totals["mean_abs_output"] += float(out.abs().sum().item())
-        if "mean_output_sq" in metric_names:
-            totals["mean_output_sq"] += float(out.pow(2).sum().item())
-        residual = out - yb
-        if "mean_abs_residual" in metric_names:
-            totals["mean_abs_residual"] += float(residual.abs().sum().item())
-        if "empirical_loss" in metric_names:
-            totals["empirical_loss"] += float(residual.pow(2).sum().item())
-
-    return {name: value / n for name, value in totals.items()}
-
-@torch.no_grad()
-def _compute_parameter_metrics(
-    model: TwoLayerNet,
-    metric_names: Sequence[str],
-) -> Dict[str, float]:
-    """Compute initialization-only parameter norms that do not depend on data."""
-    metric_names = set(metric_names)
-    W1 = model.fc1.weight.detach()
-    out: Dict[str, float] = {}
-    if "fc1_weight_fro_norm" in metric_names:
-        out["fc1_weight_fro_norm"] = float(torch.linalg.matrix_norm(W1, ord="fro").item())
-    if "fc1_weight_spectral_norm" in metric_names:
-        out["fc1_weight_spectral_norm"] = float(torch.linalg.matrix_norm(W1, ord=2).item())
-    return out
-
-@torch.no_grad()
-def _compute_gradient_metrics(
-    model: TwoLayerNet,
-    X: torch.Tensor,
-    y: torch.Tensor,
-    batch_size: int,
-    metric_names: Sequence[str],
-) -> Dict[str, float]:
-    """
-    Compute exact scalar-output parameter-gradient norms for the current model.
-
-    For f(x) = scale * fc2(tanh(fc1(x))) with no biases:
-      ||grad_fc2 f(x)||^2 = scale^2 * ||h||^2
-      ||grad_fc1 f(x)||^2 = scale^2 * ||x||^2 *
-          sum_j fc2_j^2 * (1 - h_j^2)^2
-    """
-    W1 = model.fc1.weight.detach()
-    W2 = model.fc2.weight.detach().view(-1)
-    scale = 1.0 / float(model.alpha) if model.init_type == "alpha" and model.alpha != 0 else 1.0
-    scale_sq = scale * scale
-    n = X.shape[0]
-    metric_names = set(metric_names)
-    needs_output_grad = bool(metric_names & set(OUTPUT_GRAD_METRICS))
-    needs_empirical_loss_grad = bool(metric_names & set(EMPIRICAL_LOSS_GRAD_METRICS))
-
-    emp_fc1_sum = torch.zeros_like(W1) if needs_empirical_loss_grad else None
-    emp_fc2_sum = torch.zeros_like(W2) if needs_empirical_loss_grad else None
-
-    mean_metrics = tuple(metric_names & set(OUTPUT_GRAD_METRICS))
-    totals = {name: 0.0 for name in mean_metrics}
-
-    for start in range(0, n, batch_size):
-        end = min(start + batch_size, n)
-        xb = X[start:end]
-
-        z = xb @ W1.T
-        h = torch.tanh(z)
-
-        one_minus_h2 = 1.0 - h.pow(2)
-        fc1_out_grad_sq = None
-        fc2_out_grad_sq = None
-        total_out_grad_sq = None
-
-        if needs_output_grad:
-            x_norm_sq = xb.pow(2).sum(dim=1)
-            fc2_out_grad_sq = scale_sq * h.pow(2).sum(dim=1)
-            fc1_weighted_sq = (W2.pow(2).view(1, -1) * one_minus_h2.pow(2)).sum(dim=1)
-            fc1_out_grad_sq = scale_sq * x_norm_sq * fc1_weighted_sq
-            total_out_grad_sq = fc1_out_grad_sq + fc2_out_grad_sq
-
-        if needs_output_grad:
-            if "mean_output_grad_norm" in metric_names:
-                totals["mean_output_grad_norm"] += float(torch.sqrt(total_out_grad_sq).sum().item())
-            if "mean_output_grad_norm_sq" in metric_names:
-                totals["mean_output_grad_norm_sq"] += float(total_out_grad_sq.sum().item())
-            if "mean_output_grad_norm_fc1" in metric_names:
-                totals["mean_output_grad_norm_fc1"] += float(torch.sqrt(fc1_out_grad_sq).sum().item())
-            if "mean_output_grad_norm_sq_fc1" in metric_names:
-                totals["mean_output_grad_norm_sq_fc1"] += float(fc1_out_grad_sq.sum().item())
-            if "mean_output_grad_norm_fc2" in metric_names:
-                totals["mean_output_grad_norm_fc2"] += float(torch.sqrt(fc2_out_grad_sq).sum().item())
-            if "mean_output_grad_norm_sq_fc2" in metric_names:
-                totals["mean_output_grad_norm_sq_fc2"] += float(fc2_out_grad_sq.sum().item())
-
-        if needs_empirical_loss_grad:
-            yb = y[start:end].view(-1)
-            residual = scale * (h @ W2).view(-1) - yb
-            coeff = 2.0 * residual * scale
-            emp_fc2_sum += (coeff.view(-1, 1) * h).sum(dim=0)
-            emp_fc1_batch = coeff.view(-1, 1) * W2.view(1, -1) * one_minus_h2
-            emp_fc1_sum += emp_fc1_batch.T @ xb
-
-    out = {name: value / n for name, value in totals.items()}
-
-    if needs_empirical_loss_grad:
-        emp_fc1 = emp_fc1_sum / n
-        emp_fc2 = emp_fc2_sum / n
-        emp_fc1_norm = float(torch.linalg.vector_norm(emp_fc1).item())
-        emp_fc2_norm = float(torch.linalg.vector_norm(emp_fc2).item())
-
-        if "empirical_loss_grad_norm_fc1" in metric_names:
-            out["empirical_loss_grad_norm_fc1"] = emp_fc1_norm
-        if "empirical_loss_grad_norm_fc2" in metric_names:
-            out["empirical_loss_grad_norm_fc2"] = emp_fc2_norm
-        if "empirical_loss_grad_norm" in metric_names:
-            out["empirical_loss_grad_norm"] = math.sqrt(emp_fc1_norm * emp_fc1_norm + emp_fc2_norm * emp_fc2_norm)
-
-    return out
-
-
-# -------------------------------------------------------------------------- #
 # ------------------- probe execution & output generation ------------------ #
 # -------------------------------------------------------------------------- #
 
-def _row_for_initialization(
+def _row_from_metrics(
     config: InitScaleProbeConfig,
     binary_data: Mapping[str, Any],
     n: int,
     m: int,
     alpha: float,
+    beta: float,
+    training_step: int,
     data_seed: int,
     init_seed: int,
     device: str,
+    metrics: Mapping[str, float],
 ) -> Dict[str, Any]:
-    random.seed(init_seed)
-    np.random.seed(init_seed)
-    torch.manual_seed(init_seed)
-    if device.startswith("cuda") and torch.cuda.is_available():
-        torch.cuda.manual_seed_all(init_seed)
+    """
+    Build one raw CSV row from scalar probe metrics.
 
-    model = TwoLayerNet(binary_data["d_in"], m, d_out=1, init_type=config.init_type, alpha=alpha).to(device)
-    model.eval()
+    `metrics` is expected to map every configured tracked metric name to a
+    scalar numeric value, e.g. float or int. Tuple/list-valued metrics are not
+    supported by the CSV summary code.
 
-    X = binary_data["X_train"]
-    y = binary_data["y_train_binary"]
-    tracked_metrics = config.tracked_metrics or []
-    forward_metrics = [name for name in tracked_metrics if name in FORWARD_METRICS]
-    gradient_metrics = [name for name in tracked_metrics if name in GRADIENT_METRICS]
-    parameter_metrics = [name for name in tracked_metrics if name in PARAMETER_METRICS]
-
-    metrics = {}
-    if parameter_metrics:
-        metrics.update(_compute_parameter_metrics(model, metric_names=parameter_metrics))
-    if forward_metrics:
-        metrics.update(_compute_forward_metrics(model, X, y, batch_size=config.batch_size, metric_names=forward_metrics))
-    if gradient_metrics:
-        metrics.update(
-            _compute_gradient_metrics(
-                model,
-                X,
-                y,
-                batch_size=config.jacobian_batch_size,
-                metric_names=gradient_metrics,
-            )
-        )
-
+    `training_step` is one scalar checkpoint value; the output column remains
+    "training_steps" because that is the public sweep-axis name.
+    """
     row = {
         "dataset": config.dataset,
         "init_type": config.init_type,
@@ -435,13 +251,98 @@ def _row_for_initialization(
         "n_effective": int(binary_data["n_effective"]),
         "m": int(m),
         "alpha": float(alpha),
+        "beta": float(beta),
+        "training_steps": int(training_step),
+        "eta": float(config.eta),
         "data_seed": int(data_seed),
         "init_seed": int(init_seed),
         "device": device,
     }
-    for metric_name in tracked_metrics:
+    for metric_name in config.tracked_metrics or []:
         row[metric_name] = metrics[metric_name]
     return row
+
+def _rows_for_trained_initialization(
+    config: InitScaleProbeConfig,
+    binary_data: Mapping[str, Any],
+    n: int,
+    m: int,
+    alpha: float,
+    beta: float,
+    data_seed: int,
+    init_seed: int,
+    device: str,
+) -> List[Dict[str, Any]]:
+    """Train one scalar binary trajectory and emit rows at requested steps."""
+    seed_training_run(init_seed, device)
+
+    X = binary_data["X_train"]
+    y = binary_data["y_train_binary"]
+    tracked_metrics = config.tracked_metrics or []
+    rows: List[Dict[str, Any]] = []
+
+    def measure(training_step, base):
+        metrics = get_binary_probe_stats(
+            base.model,
+            X,
+            y,
+            tracked_metrics,
+            batch_size=config.batch_size,
+            jacobian_batch_size=config.jacobian_batch_size,
+        )
+        rows.append(
+            _row_from_metrics(
+                config,
+                binary_data,
+                n=n,
+                m=m,
+                alpha=alpha,
+                beta=beta,
+                training_step=training_step,
+                data_seed=data_seed,
+                init_seed=init_seed,
+                device=device,
+                metrics=metrics,
+            )
+        )
+
+    run_full_batch_training_checkpoints(
+        d_in=int(binary_data["d_in"]),
+        d_out=1,
+        m=m,
+        init_type=config.init_type,
+        alpha=alpha,
+        device=device,
+        X_train=X,
+        targets=y,
+        beta=beta,
+        eta=config.eta,
+        checkpoint_steps=config.training_step_values,
+        measure_fn=measure,
+        batch_size=config.batch_size,
+        lam_fc1=None,
+        lam_fc2=None,
+        regularization_scale=1.0,
+    )
+    return rows
+
+def sort_probe_rows(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """Return rows in a stable order across serial and parallel runs."""
+    return [
+        dict(row)
+        for row in sorted(
+            rows,
+            key=lambda row: (
+                int(row["n"]),
+                int(row["data_seed"]),
+                int(row["m"]),
+                float(row["alpha"]),
+                float(row["beta"]),
+                int(row["init_seed"]),
+                int(row["training_steps"]),
+            ),
+        )
+    ]
 
 def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Path]]:
     if config.parallel:
@@ -473,18 +374,23 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
             )
             for m in config.m_values:
                 for alpha in config.alpha_values:
-                    for init_seed in config.init_seeds or []:
-                        row = _row_for_initialization(
-                            config,
-                            binary_data,
-                            n=n,
-                            m=m,
-                            alpha=alpha,
-                            data_seed=data_seed,
-                            init_seed=init_seed,
-                            device=device,
-                        )
-                        rows.append(row)
+                    for beta in config.beta_values:
+                        for init_seed in config.init_seeds or []:
+                            rows.extend(
+                                _rows_for_trained_initialization(
+                                    config,
+                                    binary_data,
+                                    n=n,
+                                    m=m,
+                                    alpha=alpha,
+                                    beta=beta,
+                                    data_seed=data_seed,
+                                    init_seed=init_seed,
+                                    device=device,
+                                )
+                            )
+
+    rows = sort_probe_rows(rows)
 
     summary_rows = summarize_rows(rows, config.tracked_metrics or [], report_data_seed=config.report_data_seed)
     data_seed_summary_rows = summarize_data_seed_rows(rows, config.tracked_metrics or [])
@@ -515,6 +421,7 @@ def plot_probe_from_rows(
     rows = read_csv(rows_path)
     if not rows:
         raise ValueError(f"Rows CSV is empty: {rows_path}")
+    rows = sort_probe_rows(rows)
 
     missing_plot_metrics = [name for name in config.plot_metrics if name not in rows[0]]
     if missing_plot_metrics:
@@ -552,7 +459,18 @@ def summarize_rows(
 ) -> List[Dict[str, Any]]:
     selected = [row for row in rows if int(row["data_seed"]) == int(report_data_seed)]
     grouped: Dict[Tuple[Any, ...], List[Mapping[str, Any]]] = {}
-    group_keys = ("dataset", "init_type", "n", "n_effective", "m", "alpha", "data_seed")
+    group_keys = (
+        "dataset",
+        "init_type",
+        "n",
+        "n_effective",
+        "m",
+        "alpha",
+        "beta",
+        "training_steps",
+        "eta",
+        "data_seed",
+    )
 
     for row in selected:
         key = tuple(row[name] for name in group_keys)
@@ -577,19 +495,30 @@ def summarize_data_seed_rows(
     """
     Summarize data-seed variation after averaging each data seed over init seeds.
 
-    For every `(n, m, alpha, data_seed)`, compute the init-seed mean first.
-    Then aggregate those data-seed means at each `(n, m, alpha)`. The resulting
-    metric std is therefore the standard deviation across sampled datasets, not
-    across individual initializations.
+    For every `(n, m, alpha, beta, training_steps, data_seed)`, compute the
+    init-seed mean first. Then aggregate those data-seed means at each sweep
+    point. The resulting metric std is therefore the standard deviation across
+    sampled datasets, not across individual initializations.
     """
     per_seed_groups: Dict[Tuple[Any, ...], List[Mapping[str, Any]]] = {}
-    per_seed_keys = ("dataset", "init_type", "n", "n_effective", "m", "alpha", "data_seed")
+    per_seed_keys = (
+        "dataset",
+        "init_type",
+        "n",
+        "n_effective",
+        "m",
+        "alpha",
+        "beta",
+        "training_steps",
+        "eta",
+        "data_seed",
+    )
     for row in rows:
         key = tuple(row[name] for name in per_seed_keys)
         per_seed_groups.setdefault(key, []).append(row)
 
     sweep_groups: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
-    sweep_keys = ("dataset", "init_type", "n", "m", "alpha")
+    sweep_keys = ("dataset", "init_type", "n", "m", "alpha", "beta", "training_steps", "eta")
     for key, group_rows in per_seed_groups.items():
         per_seed = {name: value for name, value in zip(per_seed_keys, key)}
         per_seed["num_inits"] = len(group_rows)

@@ -1,7 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
 import multiprocessing as mp
-from typing import Optional
+from typing import Callable, Optional, Sequence
 
 import random
 import numpy as np
@@ -124,6 +124,20 @@ def _load_rng_state(device: str, state):
             idx = torch.cuda.current_device()
         torch.cuda.set_rng_state(cuda_state, device=idx)
 
+def _configure_deterministic_backend():
+    """Set deterministic backend flags shared by training entrypoints."""
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+def seed_training_run(run_seed: int, device: str = "cpu"):
+    """Configure reproducible backend behavior and seed all RNGs for one trajectory."""
+    _configure_deterministic_backend()
+    torch.manual_seed(run_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(run_seed)
+    np.random.seed(run_seed)
+    random.seed(run_seed)
+
 # -------------------------------------------------------------------------- #
 # --------------- init variables for training & stat tracking -------------- #
 # -------------------------------------------------------------------------- #
@@ -210,19 +224,23 @@ def _zero_grads(params):
         if p.grad is not None:
             p.grad.zero_()
 
-def _forward_backward(model, data, batch_size=1024):
-    """Accumulate NN gradients over the full training set in batches."""
-    X_train = data["X_train"]
+def _forward_backward_tensors(model, X_train, targets, batch_size=1024):
+    """Accumulate model gradients over explicit tensors in full-batch form."""
     N = X_train.size(0)
     for start in range(0, N, batch_size):
         end = start + batch_size
 
         xb = X_train[start:end]
-        yb = data["y_train_one_hot"][start:end] if "y_train_one_hot" in data else data["y_train"][start:end]
+        yb = targets[start:end]
 
         outputs = model(xb)
         loss = loss_fn(outputs, yb) * (len(xb) / N)
         loss.backward()
+
+def _forward_backward(model, data, batch_size=1024):
+    """Accumulate NN gradients over the full training set in batches."""
+    targets = data["y_train_one_hot"] if "y_train_one_hot" in data else data["y_train"]
+    _forward_backward_tensors(model, data["X_train"], targets, batch_size=batch_size)
 
 def _should_stop_early(metric_name, goal, threshold, stats, lin_stats):
     """Evaluate early-stop criteria against NN or linearized metrics."""
@@ -258,6 +276,85 @@ def _apply_training_step(base, lin, beta, eta, regularization_scale, same_noise,
     else:
         langevin_step(base.params, base.lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
         langevin_step(lin.params, lin.lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
+
+def run_full_batch_training_checkpoints(
+    d_in: int,
+    d_out: int,
+    m: int,
+    init_type: str,
+    alpha: float,
+    device: str,
+    X_train: torch.Tensor,
+    targets: torch.Tensor,
+    beta: float,
+    eta: float,
+    checkpoint_steps: Sequence[int],
+    measure_fn: Callable[[int, BaseModelVars], None],
+    batch_size: int = 1024,
+    lam_fc1: Optional[float] = None,
+    lam_fc2: Optional[float] = None,
+    regularization_scale: float = 1.0,
+    init_model_state_dict: Optional[dict] = None,
+) -> BaseModelVars:
+    """
+    Train one base model trajectory and measure after selected completed updates.
+
+    This is the common-denominator loop shared by scalar probe runs and any
+    future full-batch callers that need explicit targets instead of checkpoint
+    histories. The richer experiment train() loop keeps its own metric timing,
+    linearized model handling, and early-stopping policy.
+
+    measure_fn is called as `measure_fn(completed_updates, base)` at requested
+    checkpoints. Its return value is ignored; callers should use it for side
+    effects such as appending rows. It should treat `base` as read-only unless
+    the caller intentionally wants measurement to alter the continuing trajectory.
+    """
+    requested_steps = sorted({int(step) for step in checkpoint_steps})
+    if not requested_steps:
+        raise ValueError("checkpoint_steps must be non-empty.")
+    if requested_steps[0] < 0:
+        raise ValueError("checkpoint_steps must be non-negative.")
+
+    base = _init_base_model_vars(
+        d_in,
+        d_out,
+        m,
+        init_type,
+        alpha,
+        device,
+        lam_fc1,
+        lam_fc2,
+        init_model_state_dict=init_model_state_dict,
+    )
+
+    next_checkpoint_idx = 0
+    if requested_steps[0] == 0:
+        base.model.eval()
+        measure_fn(0, base)
+        next_checkpoint_idx = 1
+
+    max_step = requested_steps[-1]
+    for step in range(1, max_step + 1):
+        base.model.train()
+        _zero_grads(base.params)
+        _forward_backward_tensors(base.model, X_train, targets, batch_size=batch_size)
+        _apply_training_step(
+            base,
+            lin=None,
+            beta=beta,
+            eta=eta,
+            regularization_scale=regularization_scale,
+            same_noise=False,
+            noise_free_after_epoch=None,
+            epoch=step,
+        )
+
+        if next_checkpoint_idx < len(requested_steps) and step == requested_steps[next_checkpoint_idx]:
+            base.model.eval()
+            measure_fn(step, base)
+            next_checkpoint_idx += 1
+
+    return base
 
 def _record_linear_metrics(metrics, base, lin, data, metric_plan):
     """Append linearized metrics and NN-vs-linearized distances."""
@@ -520,14 +617,7 @@ def _train_multiseed_worker(
     device,
     args,
 ):
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-    torch.manual_seed(run_seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(run_seed)
-    np.random.seed(run_seed)
-    random.seed(run_seed)
+    seed_training_run(run_seed, device)
 
     data = _load_data_for_seed(dataset, args, run_seed, device)
     resume_state = _load_resume_state(args.resume_paths, run_seed)
@@ -544,8 +634,7 @@ def train_multiseed(
     args,
     gpu_ids=None,
 ):
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    _configure_deterministic_backend()
 
     results = {}
     if not seeds:
