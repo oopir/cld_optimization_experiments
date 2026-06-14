@@ -10,3 +10,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.cpython-*.pyc
+
+# vscode, codex, etc
+.vscode/
+.cursor/
+.cursor-server/
+.codex/
+.agents/
