@@ -55,8 +55,8 @@ class InitScaleProbeConfig:
     m_values: List[int] = field(default_factory=lambda: [10])
     alpha_values: List[float] = field(default_factory=lambda: [1.0])
     beta_values: List[float] = field(default_factory=lambda: [float("inf")])
-    training_step_values: List[int] = field(default_factory=lambda: [0])
-    eta: float = 1.0
+    training_step_values: Optional[List[int]] = field(default_factory=lambda: [0])
+    eta: float = 0.001
     init_type: str = "alpha"
     # randomness
     data_seeds: List[int] = field(default_factory=lambda: [0])
@@ -85,18 +85,19 @@ class InitScaleProbeConfig:
     tracked_metrics: Optional[List[str]] = None # Effective __post_init__ default is all metrics.
     plot_metrics: List[str] = field(default_factory=lambda: list(CORE_METRICS))
     plot_format: str = "combined"
-    plot_facets: str = "auto"
-    plot_facet_threshold: int = 6
     plot_heatmaps: bool = True
     # output
-    output_dir: Path = Path("plots/init_scale_probe_debug")
+    output_dir: Path = Path("plots/init_scale_probe/debug")
 
     def __post_init__(self):
         self.n_values = [int(x) for x in self.n_values]
         self.m_values = [int(x) for x in self.m_values]
         self.alpha_values = [float(x) for x in self.alpha_values]
         self.beta_values = [_parse_beta_value(x) for x in self.beta_values]
-        self.training_step_values = sorted({int(x) for x in self.training_step_values})
+        if self.training_step_values is None:
+            self.training_step_values = [0]
+        else:
+            self.training_step_values = sorted({int(x) for x in self.training_step_values})
         self.eta = float(self.eta)
         self.data_seeds = [int(x) for x in self.data_seeds]
         self.num_inits = int(self.num_inits)
@@ -109,8 +110,6 @@ class InitScaleProbeConfig:
         self.output_dir = Path(self.output_dir).expanduser()
         self.plot_metrics = list(self.plot_metrics)
         self.plot_format = str(self.plot_format)
-        self.plot_facets = str(self.plot_facets)
-        self.plot_facet_threshold = int(self.plot_facet_threshold)
         self.plot_heatmaps = bool(self.plot_heatmaps)
         self.parallel = bool(self.parallel)
         if self.gpu_ids is not None:
@@ -175,10 +174,6 @@ class InitScaleProbeConfig:
             raise ValueError("progress_detail must be one of: summary, grid.")
         if self.plot_format not in {"combined", "individual", "both"}:
             raise ValueError("plot_format must be one of: combined, individual, both.")
-        if self.plot_facets not in {"auto", "off"}:
-            raise ValueError("plot_facets must be one of: auto, off.")
-        if self.plot_facet_threshold <= 0:
-            raise ValueError("plot_facet_threshold must be positive.")
         if not self.negative_classes:
             raise ValueError("negative_classes must be non-empty.")
         if not self.positive_classes:
@@ -393,6 +388,7 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
     rows = sort_probe_rows(rows)
 
     summary_rows = summarize_rows(rows, config.tracked_metrics or [], report_data_seed=config.report_data_seed)
+    init_seed_summary_rows = summarize_init_seed_rows(rows, config.tracked_metrics or [])
     data_seed_summary_rows = summarize_data_seed_rows(rows, config.tracked_metrics or [])
 
     paths = {
@@ -407,6 +403,7 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
         summary_rows,
         config,
         output_dir,
+        init_seed_summary_rows=init_seed_summary_rows,
         data_seed_summary_rows=data_seed_summary_rows,
     )
     paths.update(plot_paths)
@@ -432,6 +429,7 @@ def plot_probe_from_rows(
 
     metric_names = [name for name in (config.tracked_metrics or []) if name in rows[0]]
     summary_rows = summarize_rows(rows, metric_names, report_data_seed=config.report_data_seed)
+    init_seed_summary_rows = summarize_init_seed_rows(rows, metric_names)
     data_seed_summary_rows = summarize_data_seed_rows(rows, metric_names)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
@@ -447,6 +445,7 @@ def plot_probe_from_rows(
             summary_rows,
             config,
             config.output_dir,
+            init_seed_summary_rows=init_seed_summary_rows,
             data_seed_summary_rows=data_seed_summary_rows,
         )
     )
@@ -482,6 +481,60 @@ def summarize_rows(
         summary["num_inits"] = len(group_rows)
         for metric_name in metric_names:
             values = np.asarray([float(row[metric_name]) for row in group_rows], dtype=float)
+            summary[f"{metric_name}_mean"] = float(values.mean())
+            summary[f"{metric_name}_std"] = float(values.std())
+        summary_rows.append(summary)
+
+    return summary_rows
+
+def summarize_init_seed_rows(
+    rows: Sequence[Mapping[str, Any]],
+    metric_names: Sequence[str],
+) -> List[Dict[str, Any]]:
+    """
+    Summarize init-seed variation after averaging each init seed over data seeds.
+
+    For every `(n, m, alpha, beta, training_steps, init_seed)`, compute the
+    data-seed mean first. Then aggregate those init-seed means at each sweep
+    point. The resulting metric std is therefore the standard deviation across
+    sampled initializations, not across individual data splits.
+    """
+    per_seed_groups: Dict[Tuple[Any, ...], List[Mapping[str, Any]]] = {}
+    per_seed_keys = (
+        "dataset",
+        "init_type",
+        "n",
+        "m",
+        "alpha",
+        "beta",
+        "training_steps",
+        "eta",
+        "init_seed",
+    )
+    for row in rows:
+        key = tuple(row[name] for name in per_seed_keys)
+        per_seed_groups.setdefault(key, []).append(row)
+
+    sweep_groups: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
+    sweep_keys = ("dataset", "init_type", "n", "m", "alpha", "beta", "training_steps", "eta")
+    for key, group_rows in per_seed_groups.items():
+        per_seed = {name: value for name, value in zip(per_seed_keys, key)}
+        per_seed["n_effective"] = float(np.mean([float(row["n_effective"]) for row in group_rows]))
+        per_seed["num_data_seeds"] = len(group_rows)
+        for metric_name in metric_names:
+            values = np.asarray([float(row[metric_name]) for row in group_rows], dtype=float)
+            per_seed[f"{metric_name}_mean"] = float(values.mean())
+        sweep_key = tuple(per_seed[name] for name in sweep_keys)
+        sweep_groups.setdefault(sweep_key, []).append(per_seed)
+
+    summary_rows: List[Dict[str, Any]] = []
+    for key, seed_rows in sorted(sweep_groups.items(), key=lambda item: item[0]):
+        summary = {name: value for name, value in zip(sweep_keys, key)}
+        summary["n_effective"] = float(np.mean([float(row["n_effective"]) for row in seed_rows]))
+        summary["num_data_seeds"] = float(np.mean([float(row["num_data_seeds"]) for row in seed_rows]))
+        summary["num_inits"] = len(seed_rows)
+        for metric_name in metric_names:
+            values = np.asarray([float(row[f"{metric_name}_mean"]) for row in seed_rows], dtype=float)
             summary[f"{metric_name}_mean"] = float(values.mean())
             summary[f"{metric_name}_std"] = float(values.std())
         summary_rows.append(summary)

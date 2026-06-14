@@ -5,25 +5,24 @@ probe:
   negative_classes: [0, 1, 2, 3, 4]
   positive_classes: [5, 6, 7, 8, 9]
 
-  n_values: [1000, 2000, 4000, 8000]
-  m_values: [50, 150, 500, 1500]
-  # alpha_values: [0.1, 1.0]
-  beta_values: [10, 50, 250, .inf]
-  training_step_values: [0, 1, 10, 50]
-  eta: 0.001
+  n_values: [10, 50, 250]
+  m_values: [50, 150, 500]
+  # beta_values: [250, 1250]
+  # training_step_values: [0, 10, 50]
+  # eta: 0.001
   init_type: standard
 
-  data_seeds: [0, 1, 2, 3, 4, 5]
+  data_seeds: [0,1,2,3,4,5,6,7,8,9]
   init_seeds: null
-  num_inits: 100
+  num_inits: 25
   init_seed_start: 10000
-  report_data_seed: 0
+  # report_data_seed: 0
 
   device: cuda
   batch_size: 10000
   jacobian_batch_size: 1000
   parallel: true
-  # gpu_ids: null
+  gpu_ids: [5, 6, 7]
   init_chunk_size: 25
   adaptive_gpu_packing: true
   gpu_memory_safety_fraction: 0.9
@@ -39,15 +38,13 @@ probe:
   tracked_metrics: null  # null tracks all metrics; to track only plotted metrics, copy this list here.
   plot_metrics:          # plot_metrics has to be a subset of tracked_metrics (unless it is null)
     - mean_abs_output
-    - mean_preactivation_norm
     - mean_abs_residual
     - empirical_loss
+    - empirical_loss_grad_norm
     - mean_output_grad_norm_fc1
     - mean_output_grad_norm_fc2
-    - empirical_loss_grad_norm
+    - mean_preactivation_norm
   plot_format: combined  # combined | individual | both
-  plot_facets: "off"       # auto | "off"
-  plot_facet_threshold: 1
   plot_heatmaps: true
 
-  output_dir: plots/init_scale_probe_debug
+  output_dir: plots/init_scale_probe/
