@@ -84,8 +84,8 @@ def run_probe_parallel(config: InitScaleProbeConfig):
     # File writing and plotting
     config.output_dir.mkdir(parents=True, exist_ok=True)
     paths = {
-        "rows": config.output_dir / "init_scale_rows.csv",
-        "summary": config.output_dir / "init_scale_summary.csv",
+        "rows": config.output_dir / "_init_scale_rows.csv",
+        "summary": config.output_dir / "_init_scale_summary.csv",
     }
     write_csv(paths["rows"], rows)
     write_csv(paths["summary"], summary_rows)
@@ -296,7 +296,10 @@ def _static_memory_estimate_mb(config: InitScaleProbeConfig, item: WorkItem) -> 
     context and allocator overhead; the fixed 512 MiB term is a coarse buffer
     for those effects.
     """
-    d = int(DATASET_METADATA[config.dataset]["d_in"])
+    if config.dataset in {"synthetic_isotropic", "synthetic_anisotropic"}:
+        d = int(config.synthetic_d_in)
+    else:
+        d = int(DATASET_METADATA[config.dataset]["d_in"])
     dtype_bytes = 4
     batch = max(item.batch_size, item.jacobian_batch_size)
 
@@ -655,6 +658,10 @@ def _run_one_item(config: InitScaleProbeConfig, item: WorkItem, device: str) -> 
             device=device,
             seed=item.data_seed,
             reserve_last=worker_config.reserve_last,
+            synthetic_d_in=worker_config.synthetic_d_in,
+            synthetic_test_size=worker_config.synthetic_test_size,
+            synthetic_projection_fraction=worker_config.synthetic_projection_fraction,
+            synthetic_anisotropy_power=worker_config.synthetic_anisotropy_power,
         )
 
         rows = []

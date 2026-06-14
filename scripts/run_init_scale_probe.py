@@ -172,7 +172,7 @@ def parse_args() -> argparse.Namespace:
         "--rows-csv",
         type=Path,
         default=None,
-        help="Raw rows CSV for --plot-only. Defaults to probe.output_dir/init_scale_rows.csv.",
+        help="Raw rows CSV for --plot-only. Defaults to probe.output_dir/_init_scale_rows.csv.",
     )
     return p.parse_args()
 

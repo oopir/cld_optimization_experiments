@@ -50,6 +50,10 @@ class InitScaleProbeConfig:
     reserve_last: int = 1000
     negative_classes: List[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])
     positive_classes: List[int] = field(default_factory=lambda: [5, 6, 7, 8, 9])
+    synthetic_d_in: int = 784
+    synthetic_test_size: int = 0
+    synthetic_projection_fraction: float = 0.25
+    synthetic_anisotropy_power: float = 1.0
     # sweep
     n_values: List[int] = field(default_factory=lambda: [10])
     m_values: List[int] = field(default_factory=lambda: [10])
@@ -59,7 +63,9 @@ class InitScaleProbeConfig:
     eta: float = 0.001
     init_type: str = "alpha"
     # randomness
-    data_seeds: List[int] = field(default_factory=lambda: [0])
+    data_seeds: Optional[List[int]] = None # Effective __post_init__ default is data_seed_start + k.
+    num_data_seeds: int = 1
+    data_seed_start: int = 0
     init_seeds: Optional[List[int]] = None # Effective __post_init__ default is init_seed_start + k.
     num_inits: int = 2
     init_seed_start: int = 10000
@@ -99,12 +105,17 @@ class InitScaleProbeConfig:
         else:
             self.training_step_values = sorted({int(x) for x in self.training_step_values})
         self.eta = float(self.eta)
-        self.data_seeds = [int(x) for x in self.data_seeds]
+        self.num_data_seeds = int(self.num_data_seeds)
+        self.data_seed_start = int(self.data_seed_start)
         self.num_inits = int(self.num_inits)
         self.init_seed_start = int(self.init_seed_start)
         self.negative_classes = [int(x) for x in self.negative_classes]
         self.positive_classes = [int(x) for x in self.positive_classes]
         self.reserve_last = int(self.reserve_last)
+        self.synthetic_d_in = int(self.synthetic_d_in)
+        self.synthetic_test_size = int(self.synthetic_test_size)
+        self.synthetic_projection_fraction = float(self.synthetic_projection_fraction)
+        self.synthetic_anisotropy_power = float(self.synthetic_anisotropy_power)
         self.batch_size = int(self.batch_size)
         self.jacobian_batch_size = int(self.jacobian_batch_size)
         self.output_dir = Path(self.output_dir).expanduser()
@@ -126,8 +137,16 @@ class InitScaleProbeConfig:
             self.progress_interval_seconds = float(self.progress_interval_seconds)
         self.progress_detail = str(self.progress_detail)
 
-        if self.dataset not in {"digits", "mnist"}:
+        if self.dataset not in {"digits", "mnist", "synthetic_isotropic", "synthetic_anisotropic"}:
             raise ValueError(f"Unsupported dataset: {self.dataset!r}")
+        if self.synthetic_d_in <= 0:
+            raise ValueError("synthetic_d_in must be positive.")
+        if self.synthetic_test_size < 0:
+            raise ValueError("synthetic_test_size must be non-negative.")
+        if not (0 < self.synthetic_projection_fraction <= 1):
+            raise ValueError("synthetic_projection_fraction must be in (0, 1].")
+        if self.synthetic_anisotropy_power < 0:
+            raise ValueError("synthetic_anisotropy_power must be non-negative.")
         if not self.n_values:
             raise ValueError("n_values must be non-empty.")
         if not self.m_values:
@@ -144,8 +163,14 @@ class InitScaleProbeConfig:
             raise ValueError("beta_values must be positive or infinity.")
         if self.eta < 0:
             raise ValueError("eta must be non-negative.")
-        if not self.data_seeds:
-            raise ValueError("data_seeds must be non-empty.")
+        if self.data_seeds is None:
+            if self.num_data_seeds <= 0:
+                raise ValueError("num_data_seeds must be positive when data_seeds is omitted.")
+            self.data_seeds = [self.data_seed_start + k for k in range(self.num_data_seeds)]
+        else:
+            self.data_seeds = [int(x) for x in self.data_seeds]
+            if not self.data_seeds:
+                raise ValueError("data_seeds must be non-empty.")
         if self.init_seeds is None:
             if self.num_inits <= 0:
                 raise ValueError("num_inits must be positive when init_seeds is omitted.")
@@ -366,6 +391,10 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
                 device=device,
                 seed=data_seed,
                 reserve_last=config.reserve_last,
+                synthetic_d_in=config.synthetic_d_in,
+                synthetic_test_size=config.synthetic_test_size,
+                synthetic_projection_fraction=config.synthetic_projection_fraction,
+                synthetic_anisotropy_power=config.synthetic_anisotropy_power,
             )
             for m in config.m_values:
                 for alpha in config.alpha_values:
@@ -392,8 +421,8 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
     data_seed_summary_rows = summarize_data_seed_rows(rows, config.tracked_metrics or [])
 
     paths = {
-        "rows": output_dir / "init_scale_rows.csv",
-        "summary": output_dir / "init_scale_summary.csv",
+        "rows": output_dir / "_init_scale_rows.csv",
+        "summary": output_dir / "_init_scale_summary.csv",
     }
     write_csv(paths["rows"], rows)
     write_csv(paths["summary"], summary_rows)
@@ -414,7 +443,7 @@ def plot_probe_from_rows(
     rows_path: Optional[Path] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Path]]:
     """Regenerate summaries and plots from a saved raw rows CSV."""
-    rows_path = Path(rows_path or config.output_dir / "init_scale_rows.csv").expanduser()
+    rows_path = Path(rows_path or config.output_dir / "_init_scale_rows.csv").expanduser()
     rows = read_csv(rows_path)
     if not rows:
         raise ValueError(f"Rows CSV is empty: {rows_path}")
@@ -435,7 +464,7 @@ def plot_probe_from_rows(
     config.output_dir.mkdir(parents=True, exist_ok=True)
     paths = {
         "rows": rows_path,
-        "summary": config.output_dir / "init_scale_summary.csv",
+        "summary": config.output_dir / "_init_scale_summary.csv",
     }
     write_csv(paths["summary"], summary_rows)
     from .plotting import plot_probe_summaries

@@ -10,7 +10,7 @@ matplotlib.use("Agg", force=True)
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import NullFormatter, NullLocator, ScalarFormatter
 import numpy as np
 
 from .core import ALL_METRICS, SWEEP_AXES, InitScaleProbeConfig
@@ -239,6 +239,8 @@ def _draw_initialization_line_panel(
     if m_values and all(float(value) > 0 for value in m_values):
         ax.set_xscale("log")
         ax.xaxis.set_major_formatter(ScalarFormatter())
+        ax.xaxis.set_minor_locator(NullLocator())
+        ax.xaxis.set_minor_formatter(NullFormatter())
     if ylim is not None:
         ax.set_ylim(*ylim)
     ax.set_xticks([float(value) for value in m_values])

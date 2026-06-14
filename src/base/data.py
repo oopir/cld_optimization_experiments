@@ -12,6 +12,8 @@ warnings.filterwarnings(
 DATASET_METADATA = {
     "digits": {"d_in": 64, "num_classes": 10},
     "mnist": {"d_in": 784, "num_classes": 10},
+    "synthetic_isotropic": {"d_in": 784, "num_classes": 2},
+    "synthetic_anisotropic": {"d_in": 784, "num_classes": 2},
 }
 
 SYNTHETIC_BINARY_DATASETS = {"synthetic_isotropic", "synthetic_anisotropic"}
@@ -27,6 +29,25 @@ def _normalize_rows(X, pixel_scale):
 def _randomize_labels(y_train, seed, num_classes=10):
     rng = np.random.RandomState(seed)
     return rng.randint(0, num_classes, size=y_train.shape[0])
+
+
+def _random_binary_labels(n, seed):
+    rng = np.random.RandomState(seed)
+    return rng.choice(np.array([-1.0, 1.0], dtype=np.float32), size=int(n)).astype(np.float32)
+
+
+def _stable_seed(*parts):
+    payload = "|".join(str(part) for part in parts).encode("utf-8")
+    digest = hashlib.sha256(payload).hexdigest()
+    return int(digest[:8], 16)
+
+
+def _normalize_synthetic_rows(X):
+    X = X.astype(np.float32)
+    X = X - np.mean(X, axis=1, keepdims=True)
+    norms = np.linalg.norm(X, axis=1, keepdims=True)
+    X = X / np.maximum(norms, 1e-12) * np.sqrt(X.shape[1])
+    return X.astype(np.float32)
 
 
 def _as_tensor_dataset(X_train, X_test, y_train, y_test, d_in, device, num_classes=10):
@@ -102,6 +123,95 @@ def load_mnist_data(n, random_labels=False, device="cpu", seed=42, reserve_last=
     return _as_tensor_dataset(X_train, X_test, y_train, y_test, d_in=784, device=device)
 
 
+def _synthetic_teacher_scores(X, dataset, d_in, projection_fraction, anisotropy_power, seed):
+    k = max(1, int(d_in * projection_fraction))
+    # The projection is fixed by the full dataset configuration plus data seed,
+    # so rerunning the same config uses the same multi-index teacher.
+    teacher_seed = _stable_seed(dataset, d_in, projection_fraction, anisotropy_power, seed)
+    rng = np.random.RandomState(teacher_seed)
+    raw_projection = rng.normal(size=(d_in, k)).astype(np.float32)
+    q, _ = np.linalg.qr(raw_projection)
+    z = X @ q[:, :k]
+    return (
+        np.mean(np.tanh(z), axis=1)
+        + 0.5 * np.mean(z ** 2 - 1.0, axis=1)
+        + 0.25 * np.mean(np.sin(2.0 * z), axis=1)
+    )
+
+
+def load_synthetic_binary_data(
+    dataset,
+    n,
+    random_labels=False,
+    device="cpu",
+    seed=42,
+    d_in=784,
+    test_size=0,
+    projection_fraction=0.25,
+    anisotropy_power=1.0,
+):
+    """
+    Generate a binary synthetic multi-index dataset with labels in {-1, +1}.
+
+    The public seed determines feature draws and, through _synthetic_teacher_scores,
+    the deterministic teacher projection used to label those features.
+    """
+    if dataset not in SYNTHETIC_BINARY_DATASETS:
+        raise ValueError(f"Unsupported synthetic dataset: {dataset}")
+    d_in = int(d_in)
+    n = int(n)
+    test_size = int(test_size)
+    projection_fraction = float(projection_fraction)
+    anisotropy_power = float(anisotropy_power)
+
+    if d_in <= 0:
+        raise ValueError("synthetic d_in must be positive.")
+    if n <= 0:
+        raise ValueError("n must be positive.")
+    if test_size < 0:
+        raise ValueError("synthetic test_size must be non-negative.")
+    if not (0.0 < projection_fraction <= 1.0):
+        raise ValueError("synthetic projection_fraction must be in (0, 1].")
+    if anisotropy_power < 0:
+        raise ValueError("synthetic anisotropy_power must be non-negative.")
+
+    total = n + test_size
+    # Feature randomness is controlled directly by seed.
+    rng = np.random.RandomState(seed)
+    X = rng.normal(size=(total, d_in)).astype(np.float32)
+    if dataset == "synthetic_anisotropic":
+        variances = (np.arange(1, d_in + 1, dtype=np.float32) ** (-anisotropy_power))
+        X = X * np.sqrt(variances).reshape(1, -1)
+    X = _normalize_synthetic_rows(X)
+
+    scores = _synthetic_teacher_scores(
+        X,
+        dataset=dataset,
+        d_in=d_in,
+        projection_fraction=projection_fraction,
+        anisotropy_power=anisotropy_power,
+        seed=seed,
+    )
+    # The threshold is data-dependent but deterministic for the sampled training
+    # features, keeping the teacher labels approximately balanced.
+    threshold = np.median(scores[:n])
+    y = np.where(scores >= threshold, 1.0, -1.0).astype(np.float32)
+    if random_labels:
+        # Random labels are seeded independently of the teacher scores while
+        # leaving the feature matrix unchanged for controlled comparisons.
+        y[:n] = _random_binary_labels(n, seed)
+
+    X_train = torch.tensor(X[:n], device=device)
+    y_train = torch.tensor(y[:n], device=device, dtype=X_train.dtype).view(-1, 1)
+
+    return {
+        "d_in": d_in,
+        "d_out": 1,
+        "X_train": X_train,
+        "y_train_binary": y_train,
+        "n_effective": int(X_train.shape[0]),
+    }
+
 
 # -------------------------------------------------------------------------- #
 # ------------------------ binary classification data ---------------------- #
@@ -116,6 +226,10 @@ def load_binary_classification_data(
     device="cpu",
     seed=42,
     reserve_last=1000,
+    synthetic_d_in=784,
+    synthetic_test_size=0,
+    synthetic_projection_fraction=0.25,
+    synthetic_anisotropy_power=1.0,
 ):
     """Load a binary dataset, returning scalar labels in {-1, +1}."""
     if negative_classes is None:
@@ -123,7 +237,19 @@ def load_binary_classification_data(
     if positive_classes is None:
         positive_classes = [5, 6, 7, 8, 9]
 
-    if dataset == "digits":
+    if dataset in SYNTHETIC_BINARY_DATASETS:
+        return load_synthetic_binary_data(
+            dataset=dataset,
+            n=n,
+            random_labels=random_labels,
+            device=device,
+            seed=seed,
+            d_in=synthetic_d_in,
+            test_size=synthetic_test_size,
+            projection_fraction=synthetic_projection_fraction,
+            anisotropy_power=synthetic_anisotropy_power,
+        )
+    elif dataset == "digits":
         data = load_digits_data(n=n, random_labels=random_labels, device=device, seed=seed)
     elif dataset == "mnist":
         data = load_mnist_data(
