@@ -13,13 +13,13 @@ experiment:
     jac_probe_size: 10
     device: cuda
     track_every: 50000
-    print_every: 100000
+    print_every: 1000000
   
 run:
     ckpt_dir: "~"
-    save_ckpt: false
-    load_ckpt: true
-    load_ckpt_name: "neurips_for_rebuttal.pt"
+    save_ckpt: true
+    load_ckpt: false
+    load_ckpt_name: ".pt"
     resume_from_ckpt: false
     new_total_epochs: 0
     config_overrides: []

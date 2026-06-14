@@ -3,8 +3,16 @@ import math
 import torch
 import torch.nn.functional as F
 
-from .model import loss_fn
-from .linearized import linearized_forward, compute_param_jacobians
+from .init_scale_probe.metrics import (
+    BINARY_ALL_METRICS,
+    BINARY_CORE_METRICS,
+    BINARY_GRADIENT_METRICS,
+    BINARY_LAYERWISE_METRICS,
+    BINARY_PARAMETER_METRICS,
+    get_binary_probe_stats,
+)
+from .base.model import loss_fn
+from .base.linearized import linearized_forward, compute_param_jacobians
 from .metric_config import BASE_METRIC_NAMES, LIN_METRIC_NAMES
 
 def _param_dist(params, params0):

@@ -11,7 +11,8 @@ from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Seque
 
 import torch
 
-from ..data import DATASET_METADATA, load_binary_classification_data
+from ..base.parallel import round_robin_device_names
+from ..base.data import DATASET_METADATA, load_binary_classification_data
 from .core import (
     InitScaleProbeConfig,
     _rows_for_trained_initialization,
@@ -187,14 +188,10 @@ def _round_robin_cuda_slots(
     For example, counts `{0: 2, 1: 2, 2: 1}` produce:
     `cuda:0, cuda:1, cuda:2, cuda:0, cuda:1`.
     """
-    ordered_gpu_ids = list(gpu_ids) if gpu_ids is not None else sorted(per_gpu)
-    slots = []
-    max_slots = max((int(per_gpu.get(idx, 0)) for idx in ordered_gpu_ids), default=0)
-    for slot_index in range(max_slots):
-        for idx in ordered_gpu_ids:
-            if int(per_gpu.get(idx, 0)) > slot_index:
-                slots.append(DeviceSlot(f"cuda:{idx}"))
-    return slots
+    return [
+        DeviceSlot(device)
+        for device in round_robin_device_names(per_gpu, ordered_devices=gpu_ids)
+    ]
 
 def _gpu_ids(config: InitScaleProbeConfig, device: str) -> List[int]:
     if config.gpu_ids is not None:

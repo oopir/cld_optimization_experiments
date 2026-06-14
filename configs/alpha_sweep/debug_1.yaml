@@ -39,5 +39,5 @@ eta_tuning:
   tuning_seeds: [0] # currently only one seed supported because of parallelization over (alpha,beta), need to modify this
   metric: train_loss
   goal: min
-  output_path: "configs/tuning/etas_mnist_debug.yaml"
+  output_path: "configs/alpha_sweep/tuning/etas_mnist_debug.yaml"
   force: true

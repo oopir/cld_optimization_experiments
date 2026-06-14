@@ -8,7 +8,7 @@ experiment:
   epochs: 50000
   eta: 0
   eta_mode: per_alpha_beta # scalar / per_beta / per_alpha_beta (should match what it was set to in 'eta_tuning:' block)
-  eta_table_path: "configs/tuning/etas_mnist_3.yaml" # fill this when you use fine-tuned values
+  eta_table_path: "configs/alpha_sweep/tuning/etas_mnist_3.yaml" # fill this when you use fine-tuned values
   eta_default: null
   m: 10000
   dataset: mnist
@@ -38,5 +38,5 @@ run:
 #   tuning_seeds: [0] # currently only one seed supported because of parallelization over (alpha,beta), need to modify this
 #   metric: train_loss
 #   goal: min
-#   output_path: "configs/tuning/etas_mnist_3.yaml"
+#   output_path: "configs/alpha_sweep/tuning/etas_mnist_3.yaml"
 #   force: true

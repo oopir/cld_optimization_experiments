@@ -1,5 +1,5 @@
 """
-Compatibility shim for old torch checkpoints.
+Backward-compatible shim for old torch checkpoints.
 
 Some old checkpoints pickle config objects as src.metric_checkpoints.Exp1Config.
 Keep that class importable so torch.load can deserialize them. New code should

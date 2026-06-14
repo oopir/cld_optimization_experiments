@@ -8,18 +8,18 @@ experiment:
     m: 159056
     dataset: digits
     use_linearized: true
-    same_noise: false
+    same_noise: true
     track_jacobian: true
     jac_probe_size: 10
-    device: cuda
-    track_every: 30000
+    device: cpu
+    track_every: 50000
     print_every: 1000000
   
 run:
-    ckpt_dir: "~/"
+    ckpt_dir: "~"
     save_ckpt: false
     load_ckpt: true
-    load_ckpt_name: "neurips_ckpt.pt"
+    load_ckpt_name: "neurips_for_rebuttal.pt"
     resume_from_ckpt: false
     new_total_epochs: 0
     config_overrides: []

@@ -17,8 +17,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 os.environ["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
-from src.exp import run_exp, build_from_config_mapping, tune_eta_for_exp
-from src.plots import plot_ex1_multiseed, plot_test_error_vs_alpha
+from src.alpha_sweep.plotting import plot_test_error_vs_alpha
+from src.lazy_training_test import build_from_config_mapping, run_exp, tune_eta_for_exp
+from src.lazy_training_test.plotting import plot_ex1_multiseed
 from src.utils import select_idle_gpus_for_experiment
 
 

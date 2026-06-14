@@ -1,3 +1,12 @@
+"""
+Backward-compatible configuration and checkpoint API for the main experiment.
+
+This module intentionally stays importable as `src.config` because existing
+torch checkpoints can pickle config objects and helper references at this path.
+New experiment code may wrap or import these dataclasses, but moving their
+canonical definitions would make old checkpoint loading riskier.
+"""
+
 from pathlib import Path
 from dataclasses import dataclass, field, fields, MISSING, is_dataclass
 from typing import Optional, List
@@ -55,7 +64,7 @@ class RunOpts:
     resume_from_ckpt: bool = False
     new_total_epochs: Optional[int] = None
     config_overrides: Optional[List[str]] = None
-    plot_output_dir:  Path = Path("plots")
+    plot_output_dir:  Path = Path("plots/lazy_training_test")
 
 
 def save_checkpoint(path, results, config: ExpConfig):
