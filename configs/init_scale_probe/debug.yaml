@@ -42,8 +42,8 @@ probe:
     - empirical_loss
     - empirical_loss_grad_norm
     - mean_output_grad_norm_fc1
-    - mean_output_grad_norm_fc2
-    - mean_preactivation_norm
+    - mean_output_grad_norm_fc2_normalized
+    - mean_preactivation_norm_normalized
   plot_format: combined  # combined | individual | both
   plot_heatmaps: true
 

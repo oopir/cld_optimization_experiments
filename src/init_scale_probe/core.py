@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 from ..data import load_binary_classification_data
-from ..stats import (
+from .metrics import (
     BINARY_ALL_METRICS,
     BINARY_CORE_METRICS,
     BINARY_GRADIENT_METRICS,

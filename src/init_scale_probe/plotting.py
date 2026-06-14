@@ -679,6 +679,15 @@ def _unique_values(rows: Sequence[Mapping[str, Any]], axis: Optional[str]) -> Tu
 
 def _metric_label(name: str) -> str:
     """Human-readable metric label for titles and axes."""
+    normalized_labels = {
+        "mean_preactivation_norm_normalized": "mean preactivation norm / sqrt(m)",
+        "mean_output_grad_norm_fc2_normalized": "mean output grad norm fc2 / sqrt(m)",
+        "empirical_loss_grad_norm_fc2_normalized": "empirical loss grad norm fc2 / sqrt(m)",
+        "fc1_weight_fro_norm_normalized": "fc1 weight fro norm / sqrt(m)",
+        "fc1_weight_spectral_norm_normalized": "fc1 weight spectral norm / (1 + sqrt(m/d_in))",
+    }
+    if name in normalized_labels:
+        return normalized_labels[name]
     return name.replace("_", " ")
 
 
