@@ -1,18 +1,16 @@
 probe:
-  dataset: synthetic_anisotropic
+  dataset: synthetic_isotropic
   synthetic_d_in: 64
-  synthetic_anisotropy_powers: [0, 0.5, 1, 2]
-  random_labels: false
+  # synthetic_anisotropy_powers: [0, 0.5, 1, 2]
+  random_labels: true
   # reserve_last: 0
   negative_classes: [0, 1, 2, 3, 4]
   positive_classes: [5, 6, 7, 8, 9]
 
-  # n_values: [10, 100, 1000]
-  # m_values: [10, 100, 1000]
   n_values: [4000, 8000, 16000]
-  m_values: [6400]
-  # beta_values: [250, 1250]
-  # training_step_values: [0, 10, 50]
+  m_values: [4000, 8000, 16000]
+  # beta_values: [inf]
+  # training_step_values: [0]
   # eta: 0.001
   init_type: standard
 
@@ -28,7 +26,7 @@ probe:
   batch_size: 10000
   jacobian_batch_size: 1000
   parallel: true
-  gpu_ids: null
+  gpu_ids: [0,1,2,3]
   init_chunk_size: 25
   adaptive_gpu_packing: true
   gpu_memory_safety_fraction: 0.9
@@ -43,8 +41,6 @@ probe:
 
   tracked_metrics: null  # null tracks all metrics; to track only plotted metrics, copy this list here.
   plot_metrics:          # plot_metrics has to be a subset of tracked_metrics (unless it is null)
-    # - mean_abs_output
-    # - mean_abs_residual
     - empirical_loss
     - empirical_loss_grad_norm
     - empirical_loss_grad_norm_fc1
@@ -56,6 +52,6 @@ probe:
     - mean_output_grad_norm_fc2_normalized
     - mean_preactivation_norm_normalized
   plot_format: combined  # combined | individual | both
-  plot_heatmaps: true
+  plot_heatmaps: false
 
-  output_dir: plots/init_scale_probe/
+  output_dir: plots/init_scale_probe/m_sweep_rand_labels

@@ -559,8 +559,8 @@ def _format_grid_key(key: Tuple[int, float, int, float, float]) -> str:
     """Format the progress tuple without seed/data-seed detail."""
     n, anisotropy_power, m, alpha, beta = key
     return (
-        f"n={n:>5} anisotropy={_format_value(anisotropy_power)} "
-        f"m={m:>5} alpha={_format_value(alpha)} beta={_format_value(beta)}"
+        f"n={n:>5} anisotropy={_format_value(anisotropy_power):>3} "
+        f"m={m:>5} alpha={_format_value(alpha):>3} beta={_format_value(beta):>4}"
     )
 
 
