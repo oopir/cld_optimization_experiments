@@ -17,8 +17,8 @@ from .core import (
     InitScaleProbeConfig,
     _rows_for_trained_initialization,
     sort_probe_rows,
-    summarize_data_seed_rows,
-    summarize_init_seed_rows,
+    summarize_init_averaged_data_variability_rows,
+    summarize_data_averaged_init_variability_rows,
     summarize_rows,
     write_csv,
 )
@@ -79,8 +79,8 @@ def run_probe_parallel(config: InitScaleProbeConfig):
     # Aggregate in a deterministic order so parallel and serial CSVs are comparable.
     rows = sort_probe_rows(rows)
     summary_rows = summarize_rows(rows, config.tracked_metrics or [], report_data_seed=config.report_data_seed)
-    init_seed_summary_rows = summarize_init_seed_rows(rows, config.tracked_metrics or [])
-    data_seed_summary_rows = summarize_data_seed_rows(rows, config.tracked_metrics or [])
+    data_averaged_init_variability_rows = summarize_data_averaged_init_variability_rows(rows, config.tracked_metrics or [])
+    init_averaged_data_variability_rows = summarize_init_averaged_data_variability_rows(rows, config.tracked_metrics or [])
 
     # File writing and plotting
     config.output_dir.mkdir(parents=True, exist_ok=True)
@@ -95,8 +95,8 @@ def run_probe_parallel(config: InitScaleProbeConfig):
             summary_rows,
             config,
             config.output_dir,
-            init_seed_summary_rows=init_seed_summary_rows,
-            data_seed_summary_rows=data_seed_summary_rows,
+            data_averaged_init_variability_rows=data_averaged_init_variability_rows,
+            init_averaged_data_variability_rows=init_averaged_data_variability_rows,
         )
     )
     return rows, summary_rows, paths

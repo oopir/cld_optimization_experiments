@@ -36,8 +36,8 @@ def plot_probe_summaries(
     summary_rows: Sequence[Mapping[str, Any]],
     config: InitScaleProbeConfig,
     output_dir: Path,
-    init_seed_summary_rows: Optional[Sequence[Mapping[str, Any]]] = None,
-    data_seed_summary_rows: Optional[Sequence[Mapping[str, Any]]] = None,
+    data_averaged_init_variability_rows: Optional[Sequence[Mapping[str, Any]]] = None,
+    init_averaged_data_variability_rows: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> Dict[str, Path]:
     """Create all configured plot outputs from the already-aggregated summary rows."""
     paths: Dict[str, Path] = {}
@@ -53,16 +53,16 @@ def plot_probe_summaries(
                     summary_rows,
                     config,
                     output_dir,
-                    init_seed_summary_rows=init_seed_summary_rows,
-                    data_seed_summary_rows=data_seed_summary_rows,
+                    data_averaged_init_variability_rows=data_averaged_init_variability_rows,
+                    init_averaged_data_variability_rows=init_averaged_data_variability_rows,
                 )
             )
         paths.update(
             _plot_anisotropy_summaries(
                 config,
                 output_dir,
-                init_seed_summary_rows=init_seed_summary_rows,
-                data_seed_summary_rows=data_seed_summary_rows,
+                data_averaged_init_variability_rows=data_averaged_init_variability_rows,
+                init_averaged_data_variability_rows=init_averaged_data_variability_rows,
             )
         )
         return paths
@@ -92,8 +92,8 @@ def plot_probe_summaries(
         _plot_anisotropy_summaries(
             config,
             output_dir,
-            init_seed_summary_rows=init_seed_summary_rows,
-            data_seed_summary_rows=data_seed_summary_rows,
+            data_averaged_init_variability_rows=data_averaged_init_variability_rows,
+            init_averaged_data_variability_rows=init_averaged_data_variability_rows,
         )
     )
     return paths
@@ -113,21 +113,21 @@ def _plot_initialization_only_summaries(
     summary_rows: Sequence[Mapping[str, Any]],
     config: InitScaleProbeConfig,
     output_dir: Path,
-    init_seed_summary_rows: Optional[Sequence[Mapping[str, Any]]],
-    data_seed_summary_rows: Optional[Sequence[Mapping[str, Any]]],
+    data_averaged_init_variability_rows: Optional[Sequence[Mapping[str, Any]]],
+    init_averaged_data_variability_rows: Optional[Sequence[Mapping[str, Any]]],
 ) -> Dict[str, Path]:
-    """Create the n/m initialization atlas plots, preserving trajectory plots elsewhere."""
+    """Create the n/m initialization plots, preserving trajectory plots elsewhere."""
     paths: Dict[str, Path] = {}
-    init_rows = list(init_seed_summary_rows or summary_rows)
-    data_rows = list(data_seed_summary_rows or summary_rows)
-    if not init_rows or not data_rows:
+    data_avg_init_var_rows = list(data_averaged_init_variability_rows or summary_rows)
+    init_avg_data_var_rows = list(init_averaged_data_variability_rows or summary_rows)
+    if not data_avg_init_var_rows or not init_avg_data_var_rows:
         return paths
 
     if config.plot_format in {"combined", "both"}:
         path = output_dir / "nm_metrics.pdf"
-        figures = _make_initialization_metrics_atlas_figures(
-            init_rows,
-            data_rows,
+        figures = _make_initialization_metrics_figures(
+            data_avg_init_var_rows,
+            init_avg_data_var_rows,
             config.plot_metrics,
             plot_heatmaps=config.plot_heatmaps,
             title_suffix=_label_state_from_bool(config.random_labels),
@@ -136,13 +136,13 @@ def _plot_initialization_only_summaries(
             paths["plot_nm_metrics"] = path
 
     for metric_name in config.plot_metrics:
-        if f"{metric_name}_mean" not in init_rows[0] or f"{metric_name}_mean" not in data_rows[0]:
+        if f"{metric_name}_mean" not in data_avg_init_var_rows[0] or f"{metric_name}_mean" not in init_avg_data_var_rows[0]:
             continue
         if config.plot_format in {"individual", "both"}:
             path = output_dir / f"{metric_name}.pdf"
-            figures = _make_initialization_metrics_atlas_figures(
-                init_rows,
-                data_rows,
+            figures = _make_initialization_metrics_figures(
+                data_avg_init_var_rows,
+                init_avg_data_var_rows,
                 [metric_name],
                 plot_heatmaps=config.plot_heatmaps,
                 title_suffix=_label_state_from_bool(config.random_labels),
@@ -153,42 +153,42 @@ def _plot_initialization_only_summaries(
     return paths
 
 
-def _make_initialization_metrics_atlas_figures(
-    init_rows: Sequence[Mapping[str, Any]],
-    data_rows: Sequence[Mapping[str, Any]],
+def _make_initialization_metrics_figures(
+    data_avg_init_var_rows: Sequence[Mapping[str, Any]],
+    init_avg_data_var_rows: Sequence[Mapping[str, Any]],
     metric_names: Sequence[str],
     plot_heatmaps: bool,
     title_suffix: str = "",
 ) -> List[plt.Figure]:
     """
-    Build initialization-only atlas pages with one metric per row.
+    Build initialization-only pages with one metric per row.
 
     With heatmaps enabled, each metric row contains:
     init mean line, init std heatmap, data mean line, data std heatmap.
     Without heatmaps, each row contains only the two line panels.
     """
-    available_metric_names = _available_metric_names(init_rows, data_rows, metric_names)
+    available_metric_names = _available_metric_names(data_avg_init_var_rows, init_avg_data_var_rows, metric_names)
     if not available_metric_names:
         return []
 
     shared_ylims = {
-        metric_name: _metric_ylim([init_rows, data_rows], metric_name)
+        metric_name: _metric_ylim([data_avg_init_var_rows, init_avg_data_var_rows], metric_name)
         for metric_name in available_metric_names
     }
     metric_pages = _single_metric_pages(available_metric_names)
-    fixed_axes, fixed_keys = _varying_fixed_axes_and_keys(init_rows, data_rows, INITIALIZATION_FIXED_AXES)
+    fixed_axes, fixed_keys = _varying_fixed_axes_and_keys(data_avg_init_var_rows, init_avg_data_var_rows, INITIALIZATION_FIXED_AXES)
 
     figures: List[plt.Figure] = []
     for fixed_key in fixed_keys:
-        init_panel_rows = _rows_matching_fixed_axes(init_rows, fixed_axes, fixed_key)
-        data_panel_rows = _rows_matching_fixed_axes(data_rows, fixed_axes, fixed_key)
+        init_panel_rows = _rows_matching_fixed_axes(data_avg_init_var_rows, fixed_axes, fixed_key)
+        data_panel_rows = _rows_matching_fixed_axes(init_avg_data_var_rows, fixed_axes, fixed_key)
         if not init_panel_rows or not data_panel_rows:
             continue
 
         for page_idx, page_metric_names in enumerate(metric_pages):
-            fig, axes = _make_metric_atlas_page(len(page_metric_names), plot_heatmaps)
+            fig, axes = _make_metric_page(len(page_metric_names), plot_heatmaps)
             for row_idx, metric_name in enumerate(page_metric_names):
-                _draw_metric_atlas_row(
+                _draw_metric_row(
                     fig,
                     axes[row_idx],
                     init_panel_rows,
@@ -198,7 +198,7 @@ def _make_initialization_metrics_atlas_figures(
                     x_axis="m",
                     plot_heatmaps=plot_heatmaps,
                 )
-            _finish_metric_atlas_page(
+            _finish_metric_page(
                 fig,
                 axes,
                 init_panel_rows,
@@ -216,22 +216,22 @@ def _make_initialization_metrics_atlas_figures(
 
 
 def _available_metric_names(
-    init_rows: Sequence[Mapping[str, Any]],
-    data_rows: Sequence[Mapping[str, Any]],
+    data_avg_init_var_rows: Sequence[Mapping[str, Any]],
+    init_avg_data_var_rows: Sequence[Mapping[str, Any]],
     metric_names: Sequence[str],
 ) -> List[str]:
     """Return requested metrics available in both init- and data-seed summaries."""
     return [
         metric_name for metric_name in metric_names
-        if f"{metric_name}_mean" in init_rows[0] and f"{metric_name}_mean" in data_rows[0]
+        if f"{metric_name}_mean" in data_avg_init_var_rows[0] and f"{metric_name}_mean" in init_avg_data_var_rows[0]
     ]
 
 
-def _make_metric_atlas_page(
+def _make_metric_page(
     row_count: int,
     plot_heatmaps: bool,
 ) -> Tuple[plt.Figure, np.ndarray]:
-    """Create one metric-atlas page with stable spacing."""
+    """Create one metric page with stable spacing."""
     n_cols = 4 if plot_heatmaps else 2
     fig_width = 17.2 if plot_heatmaps else 11.6
     fig_height = max(3.35 * row_count + 1.35, 4.4)
@@ -253,11 +253,11 @@ def _make_metric_atlas_page(
     return fig, axes
 
 
-def _draw_metric_atlas_row(
+def _draw_metric_row(
     fig: plt.Figure,
     axes: Sequence[plt.Axes],
-    init_rows: Sequence[Mapping[str, Any]],
-    data_rows: Sequence[Mapping[str, Any]],
+    data_avg_init_var_rows: Sequence[Mapping[str, Any]],
+    init_avg_data_var_rows: Sequence[Mapping[str, Any]],
     metric_name: str,
     ylim: Optional[Tuple[float, float]],
     x_axis: str,
@@ -266,10 +266,11 @@ def _draw_metric_atlas_row(
     """Draw one init/data metric row, optionally with std heatmaps."""
     _draw_metric_line_panel(
         axes[0],
-        init_rows,
+        data_avg_init_var_rows,
         metric_name,
         x_axis=x_axis,
-        title="Mean over data",
+        title="mean over all seeds; \nSD of data-averaged values across init seeds",
+        # title="Avg over data seeds; SD across init seeds",
         ylim=ylim,
         ylabel="mean value",
         show_legend=False,
@@ -278,7 +279,7 @@ def _draw_metric_atlas_row(
         _draw_variability_heatmap_panel(
             fig,
             axes[1],
-            init_rows,
+            data_avg_init_var_rows,
             metric_name,
             value_kind="std",
             x_axis=x_axis,
@@ -287,10 +288,11 @@ def _draw_metric_atlas_row(
         )
         _draw_metric_line_panel(
             axes[2],
-            data_rows,
+            init_avg_data_var_rows,
             metric_name,
             x_axis=x_axis,
-            title="Mean over init",
+            title="mean over all seeds; \nSD of init-averaged values across data seeds",
+            # title="Avg over init seeds; SD across data seeds",
             ylim=ylim,
             ylabel="mean value",
             show_legend=False,
@@ -298,7 +300,7 @@ def _draw_metric_atlas_row(
         _draw_variability_heatmap_panel(
             fig,
             axes[3],
-            data_rows,
+            init_avg_data_var_rows,
             metric_name,
             value_kind="std",
             x_axis=x_axis,
@@ -308,20 +310,21 @@ def _draw_metric_atlas_row(
     else:
         _draw_metric_line_panel(
             axes[1],
-            data_rows,
+            init_avg_data_var_rows,
             metric_name,
             x_axis=x_axis,
-            title="Mean over init",
+            title="mean over all seeds; \nSD of init-averaged values across data seeds",
+            # title="Avg over init seeds; SD across data seeds",
             ylim=ylim,
             ylabel="mean value",
             show_legend=False,
         )
 
 
-def _finish_metric_atlas_page(
+def _finish_metric_page(
     fig: plt.Figure,
     axes: np.ndarray,
-    init_rows: Sequence[Mapping[str, Any]],
+    data_avg_init_var_rows: Sequence[Mapping[str, Any]],
     metric_names: Sequence[str],
     title_prefix: str,
     page_idx: int,
@@ -335,13 +338,13 @@ def _finish_metric_atlas_page(
     if page_count > 1:
         title += f" ({page_idx + 1}/{page_count})"
     subtitle = _fixed_axes_subtitle(fixed_axes, fixed_key)
-    label_state = title_suffix or _label_state_subtitle(init_rows)
+    label_state = title_suffix or _label_state_subtitle(data_avg_init_var_rows)
     if label_state:
         subtitle = ", ".join(part for part in (subtitle, label_state) if part)
     if subtitle:
         title += f" ({subtitle})"
     fig.suptitle(title, fontsize=13)
-    _draw_sample_size_legend(fig, init_rows)
+    _draw_sample_size_legend(fig, data_avg_init_var_rows)
     fig.canvas.draw()
     for row_idx, metric_name in enumerate(metric_names):
         _draw_metric_row_title(fig, axes[row_idx], metric_name)
@@ -411,21 +414,21 @@ def _draw_metric_line_panel(
 def _plot_anisotropy_summaries(
     config: InitScaleProbeConfig,
     output_dir: Path,
-    init_seed_summary_rows: Optional[Sequence[Mapping[str, Any]]],
-    data_seed_summary_rows: Optional[Sequence[Mapping[str, Any]]],
+    data_averaged_init_variability_rows: Optional[Sequence[Mapping[str, Any]]],
+    init_averaged_data_variability_rows: Optional[Sequence[Mapping[str, Any]]],
 ) -> Dict[str, Path]:
     """Create a single multipage PDF of metrics over synthetic anisotropy power."""
-    init_rows = list(init_seed_summary_rows or [])
-    data_rows = list(data_seed_summary_rows or [])
-    if not init_rows or not data_rows:
+    data_avg_init_var_rows = list(data_averaged_init_variability_rows or [])
+    init_avg_data_var_rows = list(init_averaged_data_variability_rows or [])
+    if not data_avg_init_var_rows or not init_avg_data_var_rows:
         return {}
-    powers = _unique_values([*init_rows, *data_rows], "synthetic_anisotropy_power")
+    powers = _unique_values([*data_avg_init_var_rows, *init_avg_data_var_rows], "synthetic_anisotropy_power")
     if len(powers) <= 1:
         return {}
 
     figures = _make_anisotropy_metrics_figures(
-        init_rows,
-        data_rows,
+        data_avg_init_var_rows,
+        init_avg_data_var_rows,
         config.plot_metrics,
         config.plot_heatmaps,
         title_suffix=_label_state_from_bool(config.random_labels),
@@ -437,14 +440,14 @@ def _plot_anisotropy_summaries(
 
 
 def _make_anisotropy_metrics_figures(
-    init_rows: Sequence[Mapping[str, Any]],
-    data_rows: Sequence[Mapping[str, Any]],
+    data_avg_init_var_rows: Sequence[Mapping[str, Any]],
+    init_avg_data_var_rows: Sequence[Mapping[str, Any]],
     metric_names: Sequence[str],
     plot_heatmaps: bool,
     title_suffix: str = "",
 ) -> List[plt.Figure]:
     """Build anisotropy pages with one metric per row."""
-    available_metric_names = _available_metric_names(init_rows, data_rows, metric_names)
+    available_metric_names = _available_metric_names(data_avg_init_var_rows, init_avg_data_var_rows, metric_names)
     if not available_metric_names:
         return []
 
@@ -452,27 +455,27 @@ def _make_anisotropy_metrics_figures(
     fixed_keys = sorted(
         {
             tuple(row[axis] for axis in fixed_axes)
-            for row in [*init_rows, *data_rows]
+            for row in [*data_avg_init_var_rows, *init_avg_data_var_rows]
         },
         key=lambda values: tuple(_sort_key(value) for value in values),
     )
     metric_pages = _single_metric_pages(available_metric_names)
     shared_ylims = {
-        metric_name: _metric_ylim([init_rows, data_rows], metric_name)
+        metric_name: _metric_ylim([data_avg_init_var_rows, init_avg_data_var_rows], metric_name)
         for metric_name in available_metric_names
     }
 
     figures: List[plt.Figure] = []
     for fixed_key in fixed_keys:
-        init_panel_rows = _rows_matching_fixed_axes(init_rows, fixed_axes, fixed_key)
-        data_panel_rows = _rows_matching_fixed_axes(data_rows, fixed_axes, fixed_key)
+        init_panel_rows = _rows_matching_fixed_axes(data_avg_init_var_rows, fixed_axes, fixed_key)
+        data_panel_rows = _rows_matching_fixed_axes(init_avg_data_var_rows, fixed_axes, fixed_key)
         if not init_panel_rows or not data_panel_rows:
             continue
 
         for page_idx, page_metric_names in enumerate(metric_pages):
-            fig, axes = _make_metric_atlas_page(len(page_metric_names), plot_heatmaps)
+            fig, axes = _make_metric_page(len(page_metric_names), plot_heatmaps)
             for row_idx, metric_name in enumerate(page_metric_names):
-                _draw_metric_atlas_row(
+                _draw_metric_row(
                     fig,
                     axes[row_idx],
                     init_panel_rows,
@@ -482,7 +485,7 @@ def _make_anisotropy_metrics_figures(
                     x_axis="synthetic_anisotropy_power",
                     plot_heatmaps=plot_heatmaps,
                 )
-            _finish_metric_atlas_page(
+            _finish_metric_page(
                 fig,
                 axes,
                 init_panel_rows,
@@ -576,7 +579,7 @@ def _rows_matching_fixed_axes(
     fixed_axes: Sequence[str],
     fixed_key: Sequence[Any],
 ) -> List[Mapping[str, Any]]:
-    """Filter rows to one fixed-axis page of the initialization atlas."""
+    """Filter rows to one fixed-axis page of the initialization plot."""
     if not fixed_axes:
         return list(rows)
     return [
@@ -586,7 +589,7 @@ def _rows_matching_fixed_axes(
 
 
 def _fixed_axes_subtitle(fixed_axes: Sequence[str], fixed_key: Sequence[Any]) -> str:
-    """Format compact fixed-axis values for multipage atlas titles."""
+    """Format compact fixed-axis values for multipage titles."""
     return ", ".join(
         f"{_axis_label(axis)}={_format_value(value)}"
         for axis, value in zip(fixed_axes, fixed_key)
@@ -958,7 +961,7 @@ def _clear_probe_plot_files(output_dir: Path) -> None:
         for path in (
             output_dir / f"{metric_name}_training_curves.pdf",
             output_dir / f"{metric_name}_nm_heatmaps.pdf",
-            output_dir / f"{metric_name}_initialization_atlas.pdf",
+            output_dir / f"{metric_name}_initialization.pdf",
         ):
             if path.exists():
                 path.unlink()
@@ -1006,11 +1009,6 @@ def _metric_label_parts(name: str) -> Tuple[str, str]:
     if suffix and label.endswith(suffix):
         return label[: -len(suffix)], suffix
     return label, ""
-
-
-def _draw_metric_axis_label(ax: plt.Axes, metric_name: str) -> None:
-    """Draw a metric y-axis label without splitting colored text vertically."""
-    ax.set_ylabel(_metric_label(metric_name))
 
 
 def _draw_metric_row_title(
@@ -1064,7 +1062,7 @@ def _draw_metric_row_separators(fig: plt.Figure, axes: np.ndarray) -> None:
 
 
 def _draw_sample_size_legend(fig: plt.Figure, rows: Sequence[Mapping[str, Any]]) -> None:
-    """Draw one prominent sample-size legend for an initialization atlas page."""
+    """Draw one prominent sample-size legend for an initialization page."""
     n_values = _unique_values(rows, "n")
     if len(n_values) <= 1:
         return
@@ -1154,51 +1152,6 @@ def _draw_metric_colorbar_label(colorbar_ax: plt.Axes, label: str, metric_name: 
         fontsize=plt.rcParams.get("axes.labelsize", "medium"),
         clip_on=False,
     )
-
-
-def _draw_metric_suptitle(fig: plt.Figure, metric_name: str, title: str) -> None:
-    """Draw a figure title, coloring m-related normalization red when present."""
-    _, scaling_suffix = _metric_label_parts(metric_name)
-    if not scaling_suffix or scaling_suffix not in title:
-        fig.suptitle(title, fontsize=13)
-        return
-
-    fig.suptitle(title, fontsize=13, alpha=0.0)
-    _draw_text_with_metric_suffix(fig, 0.5, 0.985, title, metric_name, fontsize=13)
-
-
-def _draw_text_with_metric_suffix(
-    fig: plt.Figure,
-    x: float,
-    y: float,
-    text: str,
-    metric_name: str,
-    fontsize: float,
-) -> None:
-    """Draw arbitrary text centered, coloring an m-scaling suffix red."""
-    _, scaling_suffix = _metric_label_parts(metric_name)
-    if not scaling_suffix or scaling_suffix not in text:
-        fig.text(x, y, text, ha="center", va="top", fontsize=fontsize)
-        return
-
-    prefix, tail = text.split(scaling_suffix, 1)
-    probes = [
-        fig.text(0.0, 0.0, prefix, ha="left", va="top", fontsize=fontsize, alpha=0.0),
-        fig.text(0.0, 0.0, scaling_suffix, ha="left", va="top", fontsize=fontsize, alpha=0.0),
-        fig.text(0.0, 0.0, tail, ha="left", va="top", fontsize=fontsize, alpha=0.0),
-    ]
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
-    widths = [probe.get_window_extent(renderer=renderer).width / fig.bbox.width for probe in probes]
-    for probe in probes:
-        probe.remove()
-
-    cursor = x - 0.5 * sum(widths)
-    fig.text(cursor, y, prefix, ha="left", va="top", fontsize=fontsize)
-    cursor += widths[0]
-    fig.text(cursor, y, scaling_suffix, ha="left", va="top", fontsize=fontsize, color="red")
-    cursor += widths[1]
-    fig.text(cursor, y, tail, ha="left", va="top", fontsize=fontsize)
 
 
 def _axis_label(name: str, log_scale: bool = False) -> str:

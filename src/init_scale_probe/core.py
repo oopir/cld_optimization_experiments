@@ -440,8 +440,8 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
     rows = sort_probe_rows(rows)
 
     summary_rows = summarize_rows(rows, config.tracked_metrics or [], report_data_seed=config.report_data_seed)
-    init_seed_summary_rows = summarize_init_seed_rows(rows, config.tracked_metrics or [])
-    data_seed_summary_rows = summarize_data_seed_rows(rows, config.tracked_metrics or [])
+    data_averaged_init_variability_rows = summarize_data_averaged_init_variability_rows(rows, config.tracked_metrics or [])
+    init_averaged_data_variability_rows = summarize_init_averaged_data_variability_rows(rows, config.tracked_metrics or [])
 
     paths = {
         "rows": output_dir / "_init_scale_rows.csv",
@@ -455,8 +455,8 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
         summary_rows,
         config,
         output_dir,
-        init_seed_summary_rows=init_seed_summary_rows,
-        data_seed_summary_rows=data_seed_summary_rows,
+        data_averaged_init_variability_rows=data_averaged_init_variability_rows,
+        init_averaged_data_variability_rows=init_averaged_data_variability_rows,
     )
     paths.update(plot_paths)
     return rows, summary_rows, paths
@@ -481,8 +481,8 @@ def plot_probe_from_rows(
 
     metric_names = [name for name in (config.tracked_metrics or []) if name in rows[0]]
     summary_rows = summarize_rows(rows, metric_names, report_data_seed=config.report_data_seed)
-    init_seed_summary_rows = summarize_init_seed_rows(rows, metric_names)
-    data_seed_summary_rows = summarize_data_seed_rows(rows, metric_names)
+    init_seed_summary_rows = summarize_data_averaged_init_variability_rows(rows, metric_names)
+    data_seed_summary_rows = summarize_init_averaged_data_variability_rows(rows, metric_names)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     paths = {
@@ -497,8 +497,8 @@ def plot_probe_from_rows(
             summary_rows,
             config,
             config.output_dir,
-            init_seed_summary_rows=init_seed_summary_rows,
-            data_seed_summary_rows=data_seed_summary_rows,
+            data_averaged_init_variability_rows=init_seed_summary_rows,
+            init_averaged_data_variability_rows=data_seed_summary_rows,
         )
     )
     return rows, summary_rows, paths
@@ -541,7 +541,7 @@ def summarize_rows(
 
     return summary_rows
 
-def summarize_init_seed_rows(
+def summarize_data_averaged_init_variability_rows(
     rows: Sequence[Mapping[str, Any]],
     metric_names: Sequence[str],
 ) -> List[Dict[str, Any]]:
@@ -606,7 +606,7 @@ def summarize_init_seed_rows(
 
     return summary_rows
 
-def summarize_data_seed_rows(
+def summarize_init_averaged_data_variability_rows(
     rows: Sequence[Mapping[str, Any]],
     metric_names: Sequence[str],
 ) -> List[Dict[str, Any]]:
