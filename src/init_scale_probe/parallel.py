@@ -32,6 +32,7 @@ class WorkItem:
     """One scheduled unit: one data/model shape and one chunk of init seeds."""
     n: int
     data_seed: int
+    synthetic_anisotropy_power: float
     m: int
     alpha: float
     beta: float
@@ -112,28 +113,30 @@ def _chunks(values: Sequence[int], chunk_size: int) -> Iterable[Sequence[int]]:
 def _build_work_items(config: InitScaleProbeConfig) -> List[WorkItem]:
     """
     Create init-seed chunks for every point in the configured sweep grid.
-    A WorkItem keeps `(n, data_seed, m, alpha, beta)` and groups several init seeds.
+    A WorkItem keeps `(n, data_seed, anisotropy, m, alpha, beta)` and groups several init seeds.
     """
     items = []
     init_seeds = list(config.init_seeds or [])
     for n in config.n_values:
         for data_seed in config.data_seeds:
-            for m in config.m_values:
-                for alpha in config.alpha_values:
-                    for beta in config.beta_values:
-                        for seed_chunk in _chunks(init_seeds, config.init_chunk_size):
-                            items.append(
-                                WorkItem(
-                                    n=n,
-                                    data_seed=data_seed,
-                                    m=m,
-                                    alpha=alpha,
-                                    beta=beta,
-                                    init_seeds=tuple(seed_chunk),
-                                    batch_size=config.batch_size,
-                                    jacobian_batch_size=config.jacobian_batch_size,
+            for anisotropy_power in config.synthetic_anisotropy_powers or [config.synthetic_anisotropy_power]:
+                for m in config.m_values:
+                    for alpha in config.alpha_values:
+                        for beta in config.beta_values:
+                            for seed_chunk in _chunks(init_seeds, config.init_chunk_size):
+                                items.append(
+                                    WorkItem(
+                                        n=n,
+                                        data_seed=data_seed,
+                                        synthetic_anisotropy_power=float(anisotropy_power),
+                                        m=m,
+                                        alpha=alpha,
+                                        beta=beta,
+                                        init_seeds=tuple(seed_chunk),
+                                        batch_size=config.batch_size,
+                                        jacobian_batch_size=config.jacobian_batch_size,
+                                    )
                                 )
-                            )
     return items
 
 # -------------------------------------------------------------------------- #
@@ -530,26 +533,35 @@ class _RunTracker:
         self.last_snapshot_time = now
 
 
-def _grid_key(item: WorkItem) -> Tuple[int, int, float, float]:
+def _grid_key(item: WorkItem) -> Tuple[int, float, int, float, float]:
     """Return the tuple used for progress counts."""
-    return (int(item.n), int(item.m), float(item.alpha), float(item.beta))
+    return (
+        int(item.n),
+        float(item.synthetic_anisotropy_power),
+        int(item.m),
+        float(item.alpha),
+        float(item.beta),
+    )
 
 
-def _item_key(item: WorkItem) -> Tuple[int, int, float, float, int, Tuple[int, ...]]:
+def _item_key(item: WorkItem) -> Tuple[int, float, int, float, float, int, Tuple[int, ...]]:
     """Return a unique key for a scheduled work/profiling item."""
     return (*_grid_key(item), int(item.data_seed), tuple(int(seed) for seed in item.init_seeds))
 
 
-def _sort_grid_key(key: Tuple[int, int, float, float]) -> Tuple[int, int, float, float]:
+def _sort_grid_key(key: Tuple[int, float, int, float, float]) -> Tuple[int, float, int, float, float]:
     """Sort progress keys by the visible `(n, m, alpha, beta)` tuple."""
-    n, m, alpha, beta = key
-    return (n, m, alpha, beta)
+    n, anisotropy_power, m, alpha, beta = key
+    return (n, anisotropy_power, m, alpha, beta)
 
 
-def _format_grid_key(key: Tuple[int, int, float, float]) -> str:
+def _format_grid_key(key: Tuple[int, float, int, float, float]) -> str:
     """Format the progress tuple without seed/data-seed detail."""
-    n, m, alpha, beta = key
-    return f"n={n:>5} m={m:>5} alpha={_format_value(alpha)} beta={_format_value(beta)}"
+    n, anisotropy_power, m, alpha, beta = key
+    return (
+        f"n={n:>5} anisotropy={_format_value(anisotropy_power)} "
+        f"m={m:>5} alpha={_format_value(alpha)} beta={_format_value(beta)}"
+    )
 
 
 def _format_item(item: WorkItem) -> str:
@@ -647,7 +659,13 @@ def _run_one_item(config: InitScaleProbeConfig, item: WorkItem, device: str) -> 
             torch.cuda.reset_peak_memory_stats()
 
         worker_config = \
-            replace(config, batch_size=item.batch_size, jacobian_batch_size=item.jacobian_batch_size, parallel=False)
+            replace(
+                config,
+                synthetic_anisotropy_power=item.synthetic_anisotropy_power,
+                batch_size=item.batch_size,
+                jacobian_batch_size=item.jacobian_batch_size,
+                parallel=False,
+            )
 
         binary_data = load_binary_classification_data(
             dataset=worker_config.dataset,
@@ -720,6 +738,7 @@ def _checked_worker_result(result: Mapping[str, Any], item: WorkItem) -> List[Di
     raise RuntimeError(
         "Probe worker failed for "
         f"n={item.n}, data_seed={item.data_seed}, m={item.m}, "
-        f"alpha={item.alpha}, beta={item.beta}, init_seeds={list(item.init_seeds)}: "
+        f"anisotropy={item.synthetic_anisotropy_power}, alpha={item.alpha}, "
+        f"beta={item.beta}, init_seeds={list(item.init_seeds)}: "
         f"{result.get('error', 'unknown error')}"
     )

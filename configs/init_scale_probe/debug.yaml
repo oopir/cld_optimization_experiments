@@ -1,8 +1,8 @@
 probe:
-  dataset: synthetic_isotropic
+  dataset: synthetic_anisotropic
   synthetic_d_in: 64
-  # synthetic_anisotropy_power: 1
-  random_labels: true
+  synthetic_anisotropy_powers: [0, 0.5, 1, 2]
+  random_labels: false
   # reserve_last: 0
   negative_classes: [0, 1, 2, 3, 4]
   positive_classes: [5, 6, 7, 8, 9]
@@ -10,7 +10,7 @@ probe:
   # n_values: [10, 100, 1000]
   # m_values: [10, 100, 1000]
   n_values: [4000, 8000, 16000]
-  m_values: [1600, 3200, 6400, 12800]
+  m_values: [6400]
   # beta_values: [250, 1250]
   # training_step_values: [0, 10, 50]
   # eta: 0.001
@@ -58,4 +58,4 @@ probe:
   plot_format: combined  # combined | individual | both
   plot_heatmaps: true
 
-  output_dir: plots/init_scale_probe/synthetic/
+  output_dir: plots/init_scale_probe/

@@ -45,13 +45,24 @@ def plot_probe_summaries(
         return paths
 
     if _is_initialization_only(config):
-        return _plot_initialization_only_summaries(
-            summary_rows,
-            config,
-            output_dir,
-            init_seed_summary_rows=init_seed_summary_rows,
-            data_seed_summary_rows=data_seed_summary_rows,
+        paths.update(
+            _plot_initialization_only_summaries(
+                summary_rows,
+                config,
+                output_dir,
+                init_seed_summary_rows=init_seed_summary_rows,
+                data_seed_summary_rows=data_seed_summary_rows,
+            )
         )
+        paths.update(
+            _plot_anisotropy_summaries(
+                config,
+                output_dir,
+                init_seed_summary_rows=init_seed_summary_rows,
+                data_seed_summary_rows=data_seed_summary_rows,
+            )
+        )
+        return paths
 
     for metric_name in config.plot_metrics:
         if f"{metric_name}_mean" not in summary_rows[0]:
@@ -74,6 +85,14 @@ def plot_probe_summaries(
                 if _save_figure_pdf(_make_nm_heatmaps_figure(summary_rows, metric_name), heatmap_path):
                     paths[f"plot_{metric_name}_nm_heatmaps"] = heatmap_path
 
+    paths.update(
+        _plot_anisotropy_summaries(
+            config,
+            output_dir,
+            init_seed_summary_rows=init_seed_summary_rows,
+            data_seed_summary_rows=data_seed_summary_rows,
+        )
+    )
     return paths
 
 
@@ -131,7 +150,10 @@ def _make_initialization_atlas_figures(
     if not init_rows or not data_rows:
         return []
 
-    fixed_axes = tuple(axis for axis in ("alpha", "beta", "training_steps") if _axis_varies(init_rows, data_rows, axis))
+    fixed_axes = tuple(
+        axis for axis in ("alpha", "beta", "training_steps", "synthetic_anisotropy_power")
+        if _axis_varies(init_rows, data_rows, axis)
+    )
     fixed_keys = sorted(
         {
             tuple(row[axis] for axis in fixed_axes)
@@ -246,6 +268,136 @@ def _draw_initialization_line_panel(
     ax.set_xticks([float(value) for value in m_values])
     ax.set_xticklabels([_format_value(value) for value in m_values])
     ax.set_xlabel(_axis_label("m"))
+    ax.set_ylabel(_metric_label(metric_name))
+    ax.set_title(title, fontsize=10)
+    ax.grid(False)
+    if len(n_values) > 1:
+        ax.legend(frameon=False, fontsize=8, title="sample size n")
+
+
+def _plot_anisotropy_summaries(
+    config: InitScaleProbeConfig,
+    output_dir: Path,
+    init_seed_summary_rows: Optional[Sequence[Mapping[str, Any]]],
+    data_seed_summary_rows: Optional[Sequence[Mapping[str, Any]]],
+) -> Dict[str, Path]:
+    """Create a single multipage PDF of metrics over synthetic anisotropy power."""
+    init_rows = list(init_seed_summary_rows or [])
+    data_rows = list(data_seed_summary_rows or [])
+    if not init_rows or not data_rows:
+        return {}
+    powers = _unique_values([*init_rows, *data_rows], "synthetic_anisotropy_power")
+    if len(powers) <= 1:
+        return {}
+
+    figures: List[plt.Figure] = []
+    for metric_name in config.plot_metrics:
+        if f"{metric_name}_mean" not in init_rows[0] or f"{metric_name}_mean" not in data_rows[0]:
+            continue
+        figures.extend(_make_anisotropy_figures(init_rows, data_rows, metric_name))
+
+    path = output_dir / "anisotropy_metrics.pdf"
+    if _save_figures_pdf(figures, path):
+        return {"plot_anisotropy_metrics": path}
+    return {}
+
+
+def _make_anisotropy_figures(
+    init_rows: Sequence[Mapping[str, Any]],
+    data_rows: Sequence[Mapping[str, Any]],
+    metric_name: str,
+) -> List[plt.Figure]:
+    """Build pages comparing init/data variability over anisotropy power."""
+    mean_key = f"{metric_name}_mean"
+    init_rows = [row for row in init_rows if mean_key in row]
+    data_rows = [row for row in data_rows if mean_key in row]
+    if not init_rows or not data_rows:
+        return []
+
+    fixed_axes = ("m", "alpha", "beta", "training_steps")
+    fixed_keys = sorted(
+        {
+            tuple(row[axis] for axis in fixed_axes)
+            for row in [*init_rows, *data_rows]
+        },
+        key=lambda values: tuple(_sort_key(value) for value in values),
+    )
+
+    figures: List[plt.Figure] = []
+    shared_ylim = _metric_ylim([init_rows, data_rows], metric_name)
+    for fixed_key in fixed_keys:
+        init_panel_rows = _rows_matching_fixed_axes(init_rows, fixed_axes, fixed_key)
+        data_panel_rows = _rows_matching_fixed_axes(data_rows, fixed_axes, fixed_key)
+        if not init_panel_rows or not data_panel_rows:
+            continue
+
+        fig, axes = plt.subplots(1, 2, figsize=(11.6, 4.2), constrained_layout=True)
+        _draw_anisotropy_line_panel(
+            axes[0],
+            init_panel_rows,
+            metric_name,
+            title="Init variability: mean over data, +/-1 std init",
+            ylim=shared_ylim,
+        )
+        _draw_anisotropy_line_panel(
+            axes[1],
+            data_panel_rows,
+            metric_name,
+            title="Data variability: mean over init, +/-1 std data",
+            ylim=shared_ylim,
+        )
+
+        subtitle = _fixed_axes_subtitle(fixed_axes, fixed_key)
+        fig.suptitle(f"{_metric_label(metric_name)} vs anisotropy power ({subtitle})", fontsize=13)
+        figures.append(fig)
+
+    return figures
+
+
+def _draw_anisotropy_line_panel(
+    ax: plt.Axes,
+    rows: Sequence[Mapping[str, Any]],
+    metric_name: str,
+    title: str,
+    ylim: Optional[Tuple[float, float]],
+) -> None:
+    """Draw metric vs synthetic anisotropy power with one line per n."""
+    mean_key = f"{metric_name}_mean"
+    std_key = f"{metric_name}_std"
+    n_values = _unique_values(rows, "n")
+    powers = _unique_values(rows, "synthetic_anisotropy_power")
+    colors = plt.cm.viridis(np.linspace(0.1, 0.9, max(len(n_values), 1)))
+    color_by_n = {n_value: colors[idx] for idx, n_value in enumerate(n_values)}
+
+    for n in n_values:
+        line_rows = sorted(
+            [
+                row for row in rows
+                if row["n"] == n and np.isfinite(float(row[mean_key]))
+            ],
+            key=lambda row: _sort_key(row["synthetic_anisotropy_power"]),
+        )
+        if not line_rows:
+            continue
+        x = np.asarray([float(row["synthetic_anisotropy_power"]) for row in line_rows], dtype=float)
+        y = np.asarray([float(row[mean_key]) for row in line_rows], dtype=float)
+        yerr = np.asarray([float(row.get(std_key, 0.0)) for row in line_rows], dtype=float)
+        ax.errorbar(
+            x,
+            y,
+            yerr=yerr,
+            marker="o",
+            capsize=3,
+            linewidth=1.5,
+            color=color_by_n[n],
+            label=f"n={_format_value(n)}",
+        )
+
+    if ylim is not None:
+        ax.set_ylim(*ylim)
+    ax.set_xticks([float(value) for value in powers])
+    ax.set_xticklabels([_format_value(value) for value in powers])
+    ax.set_xlabel(_axis_label("synthetic_anisotropy_power"))
     ax.set_ylabel(_metric_label(metric_name))
     ax.set_title(title, fontsize=10)
     ax.grid(False)
@@ -650,6 +802,9 @@ def _save_figures_pdf(figures: Sequence[Optional[plt.Figure]], path: Path) -> bo
 
 def _clear_probe_plot_files(output_dir: Path) -> None:
     """Remove stale PDF plots from all generations of this probe."""
+    anisotropy_path = output_dir / "anisotropy_metrics.pdf"
+    if anisotropy_path.exists():
+        anisotropy_path.unlink()
     for metric_name in ALL_METRICS + LEGACY_METRICS:
         for axis in SWEEP_AXES:
             for path in (
@@ -695,6 +850,8 @@ def _metric_label(name: str) -> str:
 
 def _axis_label(name: str) -> str:
     """Human-readable sweep-axis label."""
+    if name == "synthetic_anisotropy_power":
+        return "anisotropy power"
     return name.replace("_", " ")
 
 

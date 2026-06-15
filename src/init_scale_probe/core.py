@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import csv
@@ -29,7 +29,7 @@ LAYERWISE_METRICS = BINARY_LAYERWISE_METRICS
 PARAMETER_METRICS = BINARY_PARAMETER_METRICS
 ALL_METRICS = BINARY_ALL_METRICS
 GRADIENT_METRICS = BINARY_GRADIENT_METRICS
-SWEEP_AXES = ("n", "m", "alpha", "beta", "training_steps")
+SWEEP_AXES = ("n", "m", "alpha", "beta", "training_steps", "synthetic_anisotropy_power")
 
 
 def _parse_beta_value(value: Any) -> float:
@@ -54,6 +54,7 @@ class InitScaleProbeConfig:
     synthetic_test_size: int = 0
     synthetic_projection_fraction: float = 0.25
     synthetic_anisotropy_power: float = 1.0
+    synthetic_anisotropy_powers: Optional[List[float]] = None
     # sweep
     n_values: List[int] = field(default_factory=lambda: [10])
     m_values: List[int] = field(default_factory=lambda: [10])
@@ -116,6 +117,10 @@ class InitScaleProbeConfig:
         self.synthetic_test_size = int(self.synthetic_test_size)
         self.synthetic_projection_fraction = float(self.synthetic_projection_fraction)
         self.synthetic_anisotropy_power = float(self.synthetic_anisotropy_power)
+        if self.synthetic_anisotropy_powers is None:
+            self.synthetic_anisotropy_powers = [self.synthetic_anisotropy_power]
+        else:
+            self.synthetic_anisotropy_powers = [float(x) for x in self.synthetic_anisotropy_powers]
         self.batch_size = int(self.batch_size)
         self.jacobian_batch_size = int(self.jacobian_batch_size)
         self.output_dir = Path(self.output_dir).expanduser()
@@ -147,6 +152,10 @@ class InitScaleProbeConfig:
             raise ValueError("synthetic_projection_fraction must be in (0, 1].")
         if self.synthetic_anisotropy_power < 0:
             raise ValueError("synthetic_anisotropy_power must be non-negative.")
+        if not self.synthetic_anisotropy_powers:
+            raise ValueError("synthetic_anisotropy_powers must be non-empty when provided.")
+        if any(power < 0 for power in self.synthetic_anisotropy_powers):
+            raise ValueError("synthetic_anisotropy_powers must be non-negative.")
         if not self.n_values:
             raise ValueError("n_values must be non-empty.")
         if not self.m_values:
@@ -199,6 +208,16 @@ class InitScaleProbeConfig:
             raise ValueError("progress_detail must be one of: summary, grid.")
         if self.plot_format not in {"combined", "individual", "both"}:
             raise ValueError("plot_format must be one of: combined, individual, both.")
+        if len(self.synthetic_anisotropy_powers) > 1:
+            if self.dataset != "synthetic_anisotropic":
+                raise ValueError(
+                    "synthetic_anisotropy_powers with multiple values requires "
+                    "dataset='synthetic_anisotropic'."
+                )
+            if len(self.m_values) != 1:
+                raise ValueError(
+                    "synthetic_anisotropy_powers with multiple values requires exactly one m_values entry."
+                )
         if not self.negative_classes:
             raise ValueError("negative_classes must be non-empty.")
         if not self.positive_classes:
@@ -273,6 +292,7 @@ def _row_from_metrics(
         "alpha": float(alpha),
         "beta": float(beta),
         "training_steps": int(training_step),
+        "synthetic_anisotropy_power": float(config.synthetic_anisotropy_power),
         "eta": float(config.eta),
         "data_seed": int(data_seed),
         "init_seed": int(init_seed),
@@ -355,6 +375,7 @@ def sort_probe_rows(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
             key=lambda row: (
                 int(row["n"]),
                 int(row["data_seed"]),
+                float(row["synthetic_anisotropy_power"]),
                 int(row["m"]),
                 float(row["alpha"]),
                 float(row["beta"]),
@@ -382,37 +403,39 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
 
     for n in config.n_values:
         for data_seed in config.data_seeds:
-            binary_data = load_binary_classification_data(
-                dataset=config.dataset,
-                n=n,
-                negative_classes=config.negative_classes,
-                positive_classes=config.positive_classes,
-                random_labels=config.random_labels,
-                device=device,
-                seed=data_seed,
-                reserve_last=config.reserve_last,
-                synthetic_d_in=config.synthetic_d_in,
-                synthetic_test_size=config.synthetic_test_size,
-                synthetic_projection_fraction=config.synthetic_projection_fraction,
-                synthetic_anisotropy_power=config.synthetic_anisotropy_power,
-            )
-            for m in config.m_values:
-                for alpha in config.alpha_values:
-                    for beta in config.beta_values:
-                        for init_seed in config.init_seeds or []:
-                            rows.extend(
-                                _rows_for_trained_initialization(
-                                    config,
-                                    binary_data,
-                                    n=n,
-                                    m=m,
-                                    alpha=alpha,
-                                    beta=beta,
-                                    data_seed=data_seed,
-                                    init_seed=init_seed,
-                                    device=device,
+            for anisotropy_power in config.synthetic_anisotropy_powers or [config.synthetic_anisotropy_power]:
+                run_config = replace(config, synthetic_anisotropy_power=float(anisotropy_power))
+                binary_data = load_binary_classification_data(
+                    dataset=run_config.dataset,
+                    n=n,
+                    negative_classes=run_config.negative_classes,
+                    positive_classes=run_config.positive_classes,
+                    random_labels=run_config.random_labels,
+                    device=device,
+                    seed=data_seed,
+                    reserve_last=run_config.reserve_last,
+                    synthetic_d_in=run_config.synthetic_d_in,
+                    synthetic_test_size=run_config.synthetic_test_size,
+                    synthetic_projection_fraction=run_config.synthetic_projection_fraction,
+                    synthetic_anisotropy_power=run_config.synthetic_anisotropy_power,
+                )
+                for m in run_config.m_values:
+                    for alpha in run_config.alpha_values:
+                        for beta in run_config.beta_values:
+                            for init_seed in run_config.init_seeds or []:
+                                rows.extend(
+                                    _rows_for_trained_initialization(
+                                        run_config,
+                                        binary_data,
+                                        n=n,
+                                        m=m,
+                                        alpha=alpha,
+                                        beta=beta,
+                                        data_seed=data_seed,
+                                        init_seed=init_seed,
+                                        device=device,
+                                    )
                                 )
-                            )
 
     rows = sort_probe_rows(rows)
 
@@ -497,6 +520,7 @@ def summarize_rows(
         "alpha",
         "beta",
         "training_steps",
+        "synthetic_anisotropy_power",
         "eta",
         "data_seed",
     )
@@ -538,6 +562,7 @@ def summarize_init_seed_rows(
         "alpha",
         "beta",
         "training_steps",
+        "synthetic_anisotropy_power",
         "eta",
         "init_seed",
     )
@@ -546,7 +571,17 @@ def summarize_init_seed_rows(
         per_seed_groups.setdefault(key, []).append(row)
 
     sweep_groups: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
-    sweep_keys = ("dataset", "init_type", "n", "m", "alpha", "beta", "training_steps", "eta")
+    sweep_keys = (
+        "dataset",
+        "init_type",
+        "n",
+        "m",
+        "alpha",
+        "beta",
+        "training_steps",
+        "synthetic_anisotropy_power",
+        "eta",
+    )
     for key, group_rows in per_seed_groups.items():
         per_seed = {name: value for name, value in zip(per_seed_keys, key)}
         per_seed["n_effective"] = float(np.mean([float(row["n_effective"]) for row in group_rows]))
@@ -593,6 +628,7 @@ def summarize_data_seed_rows(
         "alpha",
         "beta",
         "training_steps",
+        "synthetic_anisotropy_power",
         "eta",
         "data_seed",
     )
@@ -601,7 +637,17 @@ def summarize_data_seed_rows(
         per_seed_groups.setdefault(key, []).append(row)
 
     sweep_groups: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
-    sweep_keys = ("dataset", "init_type", "n", "m", "alpha", "beta", "training_steps", "eta")
+    sweep_keys = (
+        "dataset",
+        "init_type",
+        "n",
+        "m",
+        "alpha",
+        "beta",
+        "training_steps",
+        "synthetic_anisotropy_power",
+        "eta",
+    )
     for key, group_rows in per_seed_groups.items():
         per_seed = {name: value for name, value in zip(per_seed_keys, key)}
         per_seed["num_inits"] = len(group_rows)
