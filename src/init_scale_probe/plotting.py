@@ -233,7 +233,7 @@ def _make_metric_page(
 ) -> Tuple[plt.Figure, np.ndarray]:
     """Create one metric page with stable spacing."""
     n_cols = 4 if plot_heatmaps else 2
-    fig_width = 17.2 if plot_heatmaps else 11.6
+    fig_width = 17.2 if plot_heatmaps else 9
     fig_height = max(3.35 * row_count + 1.35, 4.4)
     fig, axes = plt.subplots(
         row_count,
@@ -243,9 +243,9 @@ def _make_metric_page(
         constrained_layout=False,
     )
     fig.subplots_adjust(
-        left=0.055,
+        left=0.085,
         right=0.94,
-        bottom=0.16 if row_count == 1 else 0.08,
+        bottom=0.25 if row_count == 1 else 0.14,
         top=0.72 if row_count == 1 else 0.81,
         wspace=0.42 if plot_heatmaps else 0.3,
         hspace=1.05,
@@ -1025,7 +1025,7 @@ def _draw_metric_row_title(
     right = max(ax.get_position().x1 for ax in visible_axes)
     top = max(ax.get_position().y1 for ax in visible_axes)
     x = 0.5 * (left + right)
-    y = min(top + 0.035, 0.925)
+    y = min(top + 0.115, 0.925)
     _draw_metric_text(fig, x, y, metric_name, ha="center", va="bottom", fontsize=13)
 
 
@@ -1084,13 +1084,13 @@ def _draw_sample_size_legend(fig: plt.Figure, rows: Sequence[Mapping[str, Any]])
     fig.legend(
         handles,
         labels,
-        loc="upper center",
-        bbox_to_anchor=(0.5, 0.955),
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.035),
         ncol=len(labels),
         frameon=False,
         title="sample size",
-        fontsize=11,
-        title_fontsize=12,
+        fontsize=9,
+        title_fontsize=9,
         handlelength=2.0,
         columnspacing=1.8,
     )
