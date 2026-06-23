@@ -1,5 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
+import copy
 import multiprocessing as mp
 from typing import Optional
 
@@ -9,7 +10,13 @@ import torch
 
 from .data import load_digits_data, load_mnist_data
 from .model import TwoLayerNet, loss_fn, make_lambda_like_params
-from .langevin import langevin_step, joint_langevin_step
+from .langevin import (
+    init_momenta,
+    langevin_step,
+    momentum_baoab_final_gradient_step,
+    momentum_baoab_position_step,
+    momentum_euler_step,
+)
 from .linearized import (
     init_linearization,
     linearized_forward,
@@ -46,6 +53,14 @@ class LinearizationVars:
     params0: list
 
 @dataclass
+class MomentumVars:
+    """State for the momentum NN and its optional linearized counterpart."""
+    base: BaseModelVars
+    lin: Optional[LinearizationVars]
+    buffers: list
+    lin_buffers: Optional[list]
+
+@dataclass
 class TrainArgs:
     """Bundle options for one train() call."""
     eta: float
@@ -59,6 +74,10 @@ class TrainArgs:
     regularization_scale: float
     use_linearized: bool
     same_noise: bool
+    compare_momentum: bool
+    momentum_discretization: str
+    momentum_h: Optional[float]
+    momentum_gamma: Optional[float]
     jac_probe_size: int
     device: str
     track_every: int
@@ -85,12 +104,16 @@ class ResumeState:
     init_model_state_dict: Optional[dict] = None
     start_model_state_dict: Optional[dict] = None
     start_lin_params: Optional[list] = None
+    start_momentum_model_state_dict: Optional[dict] = None
+    start_momentum_lin_params: Optional[list] = None
+    start_momentum_buffers: Optional[list] = None
+    start_momentum_lin_buffers: Optional[list] = None
     rng_state: Optional[dict] = None
     last_epoch: Optional[int] = None
     stopped_early: bool = False
 
 # -------------------------------------------------------------------------- #
-# ---------------- save/load random state for checkpointing ---------------- #
+# ----------------------------- small helpers ------------------------------ #
 # -------------------------------------------------------------------------- #
 
 def _save_rng_state(device: str):
@@ -124,9 +147,59 @@ def _load_rng_state(device: str, state):
             idx = torch.cuda.current_device()
         torch.cuda.set_rng_state(cuda_state, device=idx)
 
+def _randn_like_params(params):
+        return [torch.randn_like(p) for p in params]
+
+def _copy_state_dict_to_cpu(state_dict):
+    """Detach checkpoint-bound state dict tensors and move them to CPU."""
+    return {k: v.detach().cpu() for k, v in state_dict.items()}
+
+def _print_training_start(device, alpha, beta, eta, epoch_offset, epochs, momentum_h=None, momentum_gamma=None):
+    """Print the compact per-worker training/resume status line."""
+    if epoch_offset < epochs:
+        print(
+            f"device {device}: training starts for alpha={alpha}, beta={beta}, eta={eta} "
+            + (f"h={momentum_h}, gamma={momentum_gamma} " if momentum_h is not None else "")
+            + f"from epoch={epoch_offset+1}...",
+            flush=True,
+        )
+    else:
+        print(f"device {device}: no need to train for alpha={alpha}, beta={beta} (early stopping triggered)")
+
+def _print_epoch_progress(device, epoch, stats, momentum_stats=None):
+    """Print the compact progress line at print_every checkpoints."""
+    print(
+        f"device {device} | "
+        f"epoch {epoch:8d} | "
+        f"loss {stats['train_loss']:.4f} | "
+        f"train acc {stats['train_acc']:.3f} | "
+        f"test acc {stats['test_acc']:.3f}"
+        + (f" | momentum loss {momentum_stats['train_loss']:.4f}" if momentum_stats is not None else ""),
+        flush=True,
+    )
+
+def _zero_grads(params):
+    """Clear manually managed parameter gradients before backward passes."""
+    for p in params:
+        if p.grad is not None:
+            p.grad.zero_()
+
 # -------------------------------------------------------------------------- #
-# --------------- init variables for training & stat tracking -------------- #
+# --------------- prep variables for training & stat tracking -------------- #
 # -------------------------------------------------------------------------- #
+
+def _clone_base_model_vars(base):
+    """Clone an initialized NN without consuming random numbers."""
+    model = copy.deepcopy(base.model)
+    params = list(model.parameters())
+    return BaseModelVars(
+        model=model,
+        params=params,
+        lam_tensors=[lam.detach().clone() for lam in base.lam_tensors],
+        params0=[p0.detach().clone() for p0 in base.params0],
+        param_norm0=base.param_norm0,
+        W0=base.W0.detach().clone(),
+    )
 
 def _init_base_model_vars(d_in, d_out, m, init_type, alpha, device, lam_fc1, lam_fc2, init_model_state_dict=None):
     """Initialize the NN and fixed-at-init quantities used by training stats."""
@@ -146,16 +219,26 @@ def _init_base_model_vars(d_in, d_out, m, init_type, alpha, device, lam_fc1, lam
 
 def _init_linearization_vars(model, params0, lam_tensors):
     """Initialize the linearized model around the NN initialization."""
-
     base_params_dict, lin_params, lin_lam_tensors = init_linearization(model, params0, lam_tensors)
     lin_params0 = [p.detach().clone() for p in lin_params]
+    return LinearizationVars(base_params_dict, lin_params, lin_lam_tensors, lin_params0)
 
-    return LinearizationVars(
-        base_params_dict,
-        lin_params,
-        lin_lam_tensors,
-        lin_params0,
-    )
+def _init_momentum_vars(base, args):
+    """Initialize momentum trajectories at the common parameter initialization."""
+    if not args.compare_momentum:
+        return None
+
+    momentum_base = _clone_base_model_vars(base)
+    momentum_lin = None
+    momentum_buffers = init_momenta(momentum_base.params)
+    momentum_lin_buffers = None
+    if args.use_linearized:
+        momentum_lin = _init_linearization_vars(
+            momentum_base.model, momentum_base.params0, momentum_base.lam_tensors
+        )
+        momentum_lin_buffers = init_momenta(momentum_lin.params)
+
+    return MomentumVars(momentum_base, momentum_lin, momentum_buffers, momentum_lin_buffers)
 
 def _init_jacobian_track_vars(d, d_out, m, init_type, alpha, device, model):
     """Prepare an initialization copy for full-dataset NTK/Jacobian drift tracking."""
@@ -163,52 +246,157 @@ def _init_jacobian_track_vars(d, d_out, m, init_type, alpha, device, model):
     model_at_init.load_state_dict(model.state_dict())
     return model_at_init
 
-def _init_metrics(metric_plan):
+def _init_metrics(metric_plan, compare_momentum=False):
     """Create metric history lists using the public checkpoint key names."""
     metrics = {
         f"{name}_hist": []
         for name in metric_plan.tracked_metrics
         if name in metric_plan.history_metrics
     }
+    if compare_momentum:
+        metrics.update({
+            f"momentum_{name}_hist": []
+            for name in metric_plan.tracked_metrics
+            if name in metric_plan.history_metrics
+        })
     metrics["epoch_hist"] = []
     metrics["tracked_metrics"] = list(metric_plan.tracked_metrics)
+    return metrics
+
+def _restore_training_state(base, lin, momentum, args, resume_state):
+    """Move all active trajectories from initialization to their checkpoint state."""
+    # NN
+    if resume_state.start_model_state_dict is not None:
+        base.model.load_state_dict(resume_state.start_model_state_dict)
+    # linearized model
+    if lin is not None and resume_state.start_lin_params is not None:
+        for p, previous in zip(lin.params, resume_state.start_lin_params):
+            p.data.copy_(previous.to(device=p.device, dtype=p.dtype))
+
+    if momentum is not None:
+        # validate that resume_state contains everything needed for momentum resume
+        if resume_state.start_model_state_dict is not None:
+            required = {
+                "momentum model": resume_state.start_momentum_model_state_dict,
+                "momentum buffers": resume_state.start_momentum_buffers,
+            }
+            if args.use_linearized:
+                required.update({
+                    "momentum linearized parameters": resume_state.start_momentum_lin_params,
+                    "momentum linearized buffers": resume_state.start_momentum_lin_buffers,
+                })
+            missing = [name for name, value in required.items() if value is None]
+            if missing:
+                raise ValueError("Cannot resume momentum run; checkpoint is missing " + ", ".join(missing))
+        # NN
+        if resume_state.start_momentum_model_state_dict is not None:
+            momentum.base.model.load_state_dict(resume_state.start_momentum_model_state_dict)
+        if resume_state.start_momentum_buffers is not None:
+            for p, previous in zip(momentum.buffers, resume_state.start_momentum_buffers):
+                p.copy_(previous.to(device=p.device, dtype=p.dtype))
+        # linearized model
+        if momentum.lin is not None and resume_state.start_momentum_lin_params is not None:
+            for p, previous in zip(momentum.lin.params, resume_state.start_momentum_lin_params):
+                p.data.copy_(previous.to(device=p.device, dtype=p.dtype))
+        if momentum.lin_buffers is not None and resume_state.start_momentum_lin_buffers is not None:
+            for p, previous in zip(momentum.lin_buffers, resume_state.start_momentum_lin_buffers):
+                p.copy_(previous.to(device=p.device, dtype=p.dtype))
+
+    # RNG
+    if resume_state.rng_state is not None:
+        _load_rng_state(args.device, resume_state.rng_state)
+
+# -------------------------------------------------------------------------- #
+# ----------------------------- record metrics ----------------------------- #
+# -------------------------------------------------------------------------- #
+
+def _record_linear_metrics(metrics, base, lin, data, metric_plan, prefix=""):
+    """Append linearized metrics and NN-vs-linearized distances."""
+    lin_stats = get_linear_stats(
+        base.model,
+        lin.base_params_dict,
+        lin.params,
+        lin.params0,
+        data,
+        metric_plan,
+    )
+    for name in LIN_METRIC_NAMES:
+        if name in metric_plan.history_metrics:
+            metrics[f"{prefix}{name}_hist"].append(lin_stats[name])
+
+    if "nn_lin_param_dist" in metric_plan.compute_metrics:
+        lin_stats["nn_lin_param_dist"] = get_nn_lin_param_dist(base.params, lin.params, normalize_by=base.param_norm0)
+        if "nn_lin_param_dist" in metric_plan.history_metrics:
+            metrics[f"{prefix}nn_lin_param_dist_hist"].append(lin_stats["nn_lin_param_dist"])
+    return lin_stats
+
+def _record_trajectory_metrics(metrics, base, lin, data, A0, A0_norm, metric_plan,
+                               model_at_init, jac_probe_size, prefix=""):
+    """Compute and append metrics for one NN/linearized dynamics pair."""
+    stats = get_stats(
+        base.model,
+        base.params,
+        base.params0,
+        A0,
+        A0_norm,
+        data,
+        metric_plan,
+    )
+    for name in BASE_METRIC_NAMES:
+        if name in metric_plan.history_metrics:
+            metrics[f"{prefix}{name}_hist"].append(stats[name])
+
+    if "jacobian_dist" in metric_plan.compute_metrics:
+        jacobian_dist = \
+            compute_dataset_jac_drift(base.model, model_at_init, data["X_train"], jac_probe_size)
+        stats["jacobian_dist"] = jacobian_dist
+        if "jacobian_dist" in metric_plan.history_metrics:
+            metrics[f"{prefix}jacobian_dist_hist"].append(jacobian_dist)
+
+    lin_stats = _record_linear_metrics(metrics, base, lin, data, metric_plan, prefix) if lin is not None else {}
+    return stats, lin_stats
+
+def _record_epoch_metrics(metrics, base, lin, momentum, data, A0, A0_norm,
+                          args, model_at_init, epoch):
+    """Record all active trajectories at one scheduled experiment epoch."""
+    metrics["epoch_hist"].append(epoch)
+
+    stats, lin_stats = \
+        _record_trajectory_metrics(metrics, base, lin, data, A0, A0_norm,
+                                   args.metric_plan, model_at_init, args.jac_probe_size)
+
+    momentum_stats = None
+    if momentum is not None:
+        momentum_stats, _ = \
+            _record_trajectory_metrics(metrics, momentum.base, momentum.lin, data, A0, A0_norm,
+                                       args.metric_plan, model_at_init, args.jac_probe_size,
+                                       prefix="momentum_")
+
+    return stats, lin_stats, momentum_stats
+
+def _finalize_metrics(metrics, base, lin, data, beta, m, device, metric_plan, init_state_for_metrics, momentum=None):
+    """Attach final bounds, RNG state, and checkpoint payload tensors."""
+    metrics["rng_state"] = _save_rng_state(device)
+
+    if "loss_floor" in metric_plan.final_metrics:
+        metrics["loss_floor"] = estimate_loss_floor(data["X_train"], beta, m=m, device=device)
+
+    metrics["model_state_dict"] = _copy_state_dict_to_cpu(base.model.state_dict())
+    metrics["init_model_state_dict"] = init_state_for_metrics
+    if lin is not None:
+        metrics["lin_params_state"] = [p.detach().cpu() for p in lin.params]
+    if momentum is not None:
+        metrics["momentum_model_state_dict"] = _copy_state_dict_to_cpu(momentum.base.model.state_dict())
+        metrics["momentum_buffers_state"] = [p.detach().cpu() for p in momentum.buffers]
+        if momentum.lin is not None:
+            metrics["momentum_lin_params_state"] = [p.detach().cpu() for p in momentum.lin.params]
+            metrics["momentum_lin_buffers_state"] = [p.detach().cpu() for p in momentum.lin_buffers]
+
     return metrics
 
 # -------------------------------------------------------------------------- #
 # -------------------- train (& handle parallelization) -------------------- #
 # -------------------------------------------------------------------------- #
-
-def _copy_state_dict_to_cpu(state_dict):
-    """Detach checkpoint-bound state dict tensors and move them to CPU."""
-    return {k: v.detach().cpu() for k, v in state_dict.items()}
-
-def _print_training_start(device, alpha, beta, eta, epoch_offset, epochs):
-    """Print the compact per-worker training/resume status line."""
-    if epoch_offset < epochs:
-        print(
-            f"device {device}: training starts for alpha={alpha}, beta={beta}, eta={eta} "
-            f"from epoch={epoch_offset+1}...",
-            flush=True,
-        )
-    else:
-        print(f"device {device}: no need to train for alpha={alpha}, beta={beta} (early stopping triggered)")
-
-def _print_epoch_progress(device, epoch, stats):
-    """Print the compact progress line at print_every checkpoints."""
-    print(
-        f"device {device} | "
-        f"epoch {epoch:8d} | "
-        f"loss {stats['train_loss']:.4f} | "
-        f"train acc {stats['train_acc']:.3f} | "
-        f"test acc {stats['test_acc']:.3f}",
-        flush=True,
-    )
-
-def _zero_grads(params):
-    """Clear manually managed parameter gradients before backward passes."""
-    for p in params:
-        if p.grad is not None:
-            p.grad.zero_()
 
 def _forward_backward(model, data, batch_size=1024):
     """Accumulate NN gradients over the full training set in batches."""
@@ -224,6 +412,62 @@ def _forward_backward(model, data, batch_size=1024):
         loss = loss_fn(outputs, yb) * (len(xb) / N)
         loss.backward()
 
+def _compute_trajectory_gradients(base, lin, data):
+    _zero_grads(base.params)
+    _forward_backward(base.model, data, batch_size=1024)
+    if lin is not None:
+        _zero_grads(lin.params)
+        outputs = linearized_forward(base.model, lin.base_params_dict, lin.params, data["X_train"])
+        loss_fn(outputs, data.get("y_train_one_hot", data["y_train"])).backward()
+
+def _trajectory_noises(base, lin, momentum_base, momentum_lin, same_noise):
+    """Return noise for overdamped NN/linearized and momentum NN/linearized, in that order."""
+    overdamped_base = _randn_like_params(base.params)
+    if same_noise:
+        return (
+            overdamped_base,
+            overdamped_base if lin is not None else None,
+            overdamped_base if momentum_base is not None else None,
+            overdamped_base if momentum_lin is not None else None,
+        )
+    return (
+        overdamped_base,
+        _randn_like_params(lin.params) if lin is not None else None,
+        _randn_like_params(momentum_base.params) if momentum_base is not None else None,
+        _randn_like_params(momentum_lin.params) if momentum_lin is not None else None,
+    )
+
+def _apply_overdamped_training_step(base, lin, current_beta, eta, regularization_scale, base_noise, lin_noise):
+    """Advance the overdamped NN and its optional linearized counterpart."""
+    langevin_step(base.params, base.lam_tensors, beta=current_beta, eta=eta,
+                  regularization_scale=regularization_scale, noises=base_noise)
+    if lin is not None:
+        langevin_step(lin.params, lin.lam_tensors, beta=current_beta, eta=eta,
+                      regularization_scale=regularization_scale, noises=lin_noise)
+
+def _apply_momentum_training_step(momentum, data, args, current_beta, base_noise, lin_noise):
+    """Advance momentum trajectories and complete BAOAB when needed."""
+    step = momentum_euler_step
+    if args.momentum_discretization == "baoab":
+        step = momentum_baoab_position_step
+
+    step(momentum.base.params, momentum.base.lam_tensors, momentum.buffers, current_beta,
+         args.momentum_h, args.momentum_gamma, args.regularization_scale, noises=base_noise)
+    if momentum.lin is not None:
+        step(momentum.lin.params, momentum.lin.lam_tensors, momentum.lin_buffers, current_beta,
+             args.momentum_h, args.momentum_gamma, args.regularization_scale, noises=lin_noise)
+
+    if args.momentum_discretization != "baoab":
+        return False
+    else:
+        _compute_trajectory_gradients(momentum.base, momentum.lin, data)
+        momentum_baoab_final_gradient_step(momentum.base.params, momentum.base.lam_tensors, momentum.buffers,
+                                  current_beta, args.momentum_h, args.regularization_scale)
+        if momentum.lin is not None:
+            momentum_baoab_final_gradient_step(momentum.lin.params, momentum.lin.lam_tensors, momentum.lin_buffers,
+                                      current_beta, args.momentum_h, args.regularization_scale)
+        return True
+
 def _should_stop_early(metric_name, goal, threshold, stats, lin_stats):
     """Evaluate early-stop criteria against NN or linearized metrics."""
     if metric_name is None or threshold is None:
@@ -238,117 +482,21 @@ def _should_stop_early(metric_name, goal, threshold, stats, lin_stats):
     should_stop = (goal == "min" and current <= threshold) or (goal == "max" and current >= threshold)
     return should_stop, current
 
-def _apply_training_step(base, lin, beta, eta, regularization_scale, same_noise, noise_free_after_epoch, epoch):
-    """Apply Langevin updates, including shared-noise and noise-free tail modes."""
-    deterministic = noise_free_after_epoch is not None and epoch > noise_free_after_epoch
-    current_beta = float("inf") if deterministic else beta
-
-    if lin is None:
-        langevin_step(base.params, base.lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
-    elif same_noise:
-        joint_langevin_step(
-            base.params,
-            base.lam_tensors,
-            lin.params,
-            lin.lam_tensors,
-            beta=current_beta,
-            eta=eta,
-            regularization_scale=regularization_scale,
-        )
-    else:
-        langevin_step(base.params, base.lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
-        langevin_step(lin.params, lin.lam_tensors, beta=current_beta, eta=eta, regularization_scale=regularization_scale)
-
-def _record_linear_metrics(metrics, base, lin, data, metric_plan):
-    """Append linearized metrics and NN-vs-linearized distances."""
-    lin_stats = get_linear_stats(
-        base.model,
-        lin.base_params_dict,
-        lin.params,
-        lin.params0,
-        data,
-        metric_plan,
-    )
-    for name in LIN_METRIC_NAMES:
-        if name in metric_plan.history_metrics:
-            metrics[f"{name}_hist"].append(lin_stats[name])
-
-    if "nn_lin_param_dist" in metric_plan.compute_metrics:
-        lin_stats["nn_lin_param_dist"] = get_nn_lin_param_dist(base.params, lin.params, normalize_by=base.param_norm0)
-        if "nn_lin_param_dist" in metric_plan.history_metrics:
-            metrics["nn_lin_param_dist_hist"].append(lin_stats["nn_lin_param_dist"])
-    return lin_stats
-
-def _record_epoch_metrics(
-    metrics,
-    base,
-    lin,
-    data,
-    A0,
-    A0_norm,
-    metric_plan,
-    model_at_init,
-    jac_probe_size,
-    epoch,
-):
-    """Append all metrics tracked at a scheduled epoch."""
-    metrics["epoch_hist"].append(epoch)
-
-    stats = get_stats(
-        base.model,
-        base.params,
-        base.params0,
-        A0,
-        A0_norm,
-        data,
-        metric_plan,
-    )
-    for name in BASE_METRIC_NAMES:
-        if name in metric_plan.history_metrics:
-            metrics[f"{name}_hist"].append(stats[name])
-
-    if "jacobian_dist" in metric_plan.compute_metrics:
-        jacobian_dist = \
-            compute_dataset_jac_drift(base.model, model_at_init, data["X_train"], jac_probe_size)
-        stats["jacobian_dist"] = jacobian_dist
-        if "jacobian_dist" in metric_plan.history_metrics:
-            metrics["jacobian_dist_hist"].append(jacobian_dist)
-
-    lin_stats = _record_linear_metrics(metrics, base, lin, data, metric_plan) if lin is not None else {}
-    return stats, lin_stats
-
-def _finalize_metrics(metrics, base, lin, data, beta, m, device, metric_plan, init_state_for_metrics):
-    """Attach final bounds, RNG state, and checkpoint payload tensors."""
-    metrics["rng_state"] = _save_rng_state(device)
-
-    if "loss_floor" in metric_plan.final_metrics:
-        metrics["loss_floor"] = estimate_loss_floor(data["X_train"], beta, m=m, device=device)
-
-    metrics["model_state_dict"] = _copy_state_dict_to_cpu(base.model.state_dict())
-    metrics["init_model_state_dict"] = init_state_for_metrics
-    if lin is not None:
-        metrics["lin_params_state"] = [p.detach().cpu() for p in lin.params]
-
-    return metrics
-
 def train(data, args, resume_state=None):
     """Run the training loop for one initialized dataset."""
+
+    # --------- initialization state and fixed-at-init references ---------- #
+
     if resume_state is None:
         resume_state = ResumeState()
 
     X_train = data["X_train"]
 
-    base = _init_base_model_vars(
-        data["d_in"],
-        data["d_out"],
-        args.m,
-        args.init_type,
-        args.alpha,
-        args.device,
-        args.lam_fc1,
-        args.lam_fc2,
-        resume_state.init_model_state_dict,
-    )
+    # Initialize the baseline NN, its optional linearization, and the coupled
+    # momentum variants from one common parameter initialization.
+    base = _init_base_model_vars(data["d_in"], data["d_out"], args.m, args.init_type,
+                                 args.alpha, args.device, args.lam_fc1, args.lam_fc2,
+                                 resume_state.init_model_state_dict)
 
     if resume_state.init_model_state_dict is not None:
         init_state_for_metrics = _copy_state_dict_to_cpu(resume_state.init_model_state_dict)
@@ -358,21 +506,14 @@ def train(data, args, resume_state=None):
     lin = None
     if args.use_linearized:
         lin = _init_linearization_vars(base.model, base.params0, base.lam_tensors)
-        if resume_state.start_lin_params is not None:
-            for p, p_prev in zip(lin.params, resume_state.start_lin_params):
-                p.data.copy_(p_prev.to(device=p.device, dtype=p.dtype))
 
+    momentum = _init_momentum_vars(base, args)
+
+    # Keep initialization-time references only when requested metrics need them.
     model_at_init = None
     if args.metric_plan.needs_jacobian_reference:
-        model_at_init = _init_jacobian_track_vars(
-            data["d_in"], 
-            data["d_out"], 
-            args.m, 
-            args.init_type, 
-            args.alpha, 
-            args.device, 
-            base.model,
-        )
+        model_at_init = _init_jacobian_track_vars(data["d_in"], data["d_out"], args.m,
+                                                  args.init_type, args.alpha, args.device, base.model)
 
     A0 = None
     A0_norm = None
@@ -381,92 +522,78 @@ def train(data, args, resume_state=None):
             A0 = torch.tanh(X_train @ base.model.fc1.weight.T)
             A0_norm = A0.norm().item()
 
-    metrics = _init_metrics(args.metric_plan)
+    metrics = _init_metrics(args.metric_plan, args.compare_momentum)
     metrics["stopped_early"] = False
 
-    if resume_state.start_model_state_dict is not None:
-        base.model.load_state_dict(resume_state.start_model_state_dict)
+    # -------- restore current trajectory positions and random state ------- #
 
-    if resume_state.rng_state is not None:
-        _load_rng_state(args.device, resume_state.rng_state)
+    _restore_training_state(base, lin, momentum, args, resume_state)
 
-    _print_training_start(args.device, args.alpha, args.beta, args.eta, args.epoch_offset, args.epochs)
-    stats = get_stats(
-        base.model,
-        base.params,
-        base.params0,
-        A0,
-        A0_norm,
-        data,
-        args.metric_plan,
-    )
+    # --------------------------- training loop ---------------------------- #
 
+    _print_training_start(args.device, args.alpha, args.beta, args.eta, args.epoch_offset, args.epochs,
+                          args.momentum_h if args.compare_momentum else None,
+                          args.momentum_gamma if args.compare_momentum else None)
+    stats = get_stats(base.model, base.params, base.params0, A0, A0_norm, data, args.metric_plan)
+
+    momentum_grads_ready = False
     last_epoch = args.epoch_offset
     for epoch in range(args.epoch_offset + 1, args.epochs + 1):
         last_epoch = epoch
+
+        # Record metrics, print progress, and check the baseline stopping criterion.
         base.model.eval()
+        if momentum is not None:
+            momentum.base.model.eval()
         if args.track_every == 1 or epoch % args.track_every == 1:
-            stats, lin_stats = _record_epoch_metrics(
-                metrics,
-                base,
-                lin,
-                data,
-                A0,
-                A0_norm,
-                args.metric_plan,
-                model_at_init,
-                args.jac_probe_size,
-                epoch,
-            )
+            stats, lin_stats, momentum_stats = \
+                _record_epoch_metrics(metrics, base, lin, momentum, data, A0, A0_norm,
+                                      args, model_at_init, epoch)
 
             if args.print_every == 1 or epoch % args.print_every == 1:
-                _print_epoch_progress(args.device, epoch, stats)
+                _print_epoch_progress(args.device, epoch, stats, momentum_stats)
 
-            should_stop, cur = _should_stop_early(
-                args.early_stop_metric,
-                args.early_stop_goal,
-                args.early_stop_value,
-                stats,
-                lin_stats,
-            )
+            should_stop, cur = _should_stop_early(args.early_stop_metric, args.early_stop_goal,
+                                                  args.early_stop_value, stats, lin_stats)
             if should_stop:
                 print(f"device {args.device}: early stopping, epoch={epoch}, {args.early_stop_metric}={cur:.3f}")
                 metrics["stopped_early"] = True
                 break
 
+        # Compute gradients and advance the active trajectories by one step.
         base.model.train()
-        _zero_grads(base.params)
-        _forward_backward(base.model, data, batch_size=1024)
+        _compute_trajectory_gradients(base, lin, data)
+        if momentum is not None:
+            momentum.base.model.train()
+            if args.momentum_discretization != "baoab" or not momentum_grads_ready:
+                _compute_trajectory_gradients(momentum.base, momentum.lin, data)
 
-        if lin is not None:
-            _zero_grads(lin.params)
-            lin_outputs = linearized_forward(base.model, lin.base_params_dict, lin.params, X_train)
-            lin_targets = data.get("y_train_one_hot", data["y_train"])
-            loss_fn(lin_outputs, lin_targets).backward()
+        # Draw either one common Gaussian sample or one independent sample
+        # per trajectory, then apply each dynamics' own noise scaling.
+        overdamped_base_noise, overdamped_lin_noise, momentum_base_noise, momentum_lin_noise = \
+            _trajectory_noises(
+                base,
+                lin,
+                momentum.base if momentum is not None else None,
+                momentum.lin  if momentum is not None else None,
+                args.same_noise
+            )
+        deterministic = args.noise_free_after_epoch is not None and epoch > args.noise_free_after_epoch
+        current_beta = float("inf") if deterministic else args.beta
 
-        _apply_training_step(
-            base,
-            lin,
-            args.beta,
-            args.eta,
-            args.regularization_scale,
-            args.same_noise,
-            args.noise_free_after_epoch,
-            epoch,
-        )
+        # Advance the overdamped pair, followed by the momentum pair.
+        _apply_overdamped_training_step(base, lin, current_beta, args.eta, args.regularization_scale,
+                                        overdamped_base_noise, overdamped_lin_noise)
+        if momentum is not None:
+            momentum_grads_ready = \
+                _apply_momentum_training_step(momentum, data, args, current_beta,
+                                          momentum_base_noise, momentum_lin_noise)
+
+    # ------------------------- finalize metrics --------------------------- #
 
     metrics["last_epoch"] = last_epoch
-    return _finalize_metrics(
-        metrics,
-        base,
-        lin,
-        data,
-        args.beta,
-        args.m,
-        args.device,
-        args.metric_plan,
-        init_state_for_metrics,
-    )
+    return _finalize_metrics(metrics, base, lin, data, args.beta, args.m, args.device,
+                             args.metric_plan, init_state_for_metrics, momentum)
 
 # -------------------------------------------------------------------------- #
 
@@ -498,6 +625,10 @@ def _load_resume_state(resume_paths, run_seed):
         init_model_state_dict=payload.get("init_model_state_dict", None),
         start_model_state_dict=payload.get("start_model_state_dict", None),
         start_lin_params=payload.get("start_lin_params", None),
+        start_momentum_model_state_dict=payload.get("start_momentum_model_state_dict", None),
+        start_momentum_lin_params=payload.get("start_momentum_lin_params", None),
+        start_momentum_buffers=payload.get("start_momentum_buffers", None),
+        start_momentum_lin_buffers=payload.get("start_momentum_lin_buffers", None),
         rng_state=payload.get("rng_state", None),
         last_epoch=payload.get("last_epoch", None),
         stopped_early=payload.get("stopped_early", False),

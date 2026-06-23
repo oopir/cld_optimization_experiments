@@ -76,21 +76,20 @@ def _mean_std_tuple_component(results_by_seed, key, component):
     return arr[:, :, component].mean(axis=0), arr[:, :, component].std(axis=0), min_len
 
 
-def _plot_band(ax, x, mean, std, label, color, lin=False, lw=2.0):
+def _plot_band(ax, x, mean, std, label, color, linestyle="-", lw=2.0):
     """Plot a mean history with a seed-std band."""
-    linestyle = "--" if lin else "-"
     ax.plot(x, mean, label=label, color=color, linestyle=linestyle, linewidth=lw)
     ax.fill_between(x, mean - std, mean + std, alpha=0.2, color=color, linewidth=0.0)
 
 
-def _plot_l2_cos_metric(results_by_seed, axes, base_x, key, axis_l2, axis_cos, label, color):
+def _plot_l2_cos_metric(results_by_seed, axes, base_x, key, axis_l2, axis_cos, label, color, linestyle="-"):
     """Plot distance histories stored as (L2, cosine), e.g. NTK drift or NN-vs-linearized."""
     l2_mean, l2_std, length = _mean_std_tuple_component(results_by_seed, key, component=0)
     l2_mean[0] = max(l2_mean[0], 1e-12)
-    _plot_band(axes[axis_l2], base_x[:length], l2_mean, l2_std, label=label, color=color)
+    _plot_band(axes[axis_l2], base_x[:length], l2_mean, l2_std, label=label, color=color, linestyle=linestyle)
 
     co_mean, co_std, length = _mean_std_tuple_component(results_by_seed, key, component=1)
-    _plot_band(axes[axis_cos], base_x[:length], co_mean, co_std, label=label, color=color)
+    _plot_band(axes[axis_cos], base_x[:length], co_mean, co_std, label=label, color=color, linestyle=linestyle)
     return {axis_l2, axis_cos}
 
 
@@ -212,6 +211,20 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
                 )
             else:
                 _warn_missing(run_name, "Jacobian drift", "jacobian_dist_hist")
+            if _has_history(run_results_by_seed, "momentum_jacobian_dist_hist"):
+                plotted_axes.update(
+                    _plot_l2_cos_metric(
+                        run_results_by_seed,
+                        axes,
+                        base_x,
+                        key="momentum_jacobian_dist_hist",
+                        axis_l2="jacobian_dist_l2",
+                        axis_cos="jacobian_dist_co",
+                        label=f"{run_name} momentum",
+                        color=c,
+                        linestyle=":",
+                    )
+                )
 
         if use_linearized:
             if _has_history(run_results_by_seed, "nn_lin_param_dist_hist"):
@@ -229,6 +242,20 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
                 )
             else:
                 _warn_missing(run_name, "NN-vs-linearized distance", "nn_lin_param_dist_hist")
+            if _has_history(run_results_by_seed, "momentum_nn_lin_param_dist_hist"):
+                plotted_axes.update(
+                    _plot_l2_cos_metric(
+                        run_results_by_seed,
+                        axes,
+                        base_x,
+                        key="momentum_nn_lin_param_dist_hist",
+                        axis_l2="nn_to_lin_dist_l2",
+                        axis_cos="nn_to_lin_dist_co",
+                        label=f"{run_name} momentum",
+                        color=c,
+                        linestyle=":",
+                    )
+                )
 
         if _has_history(run_results_by_seed, "feat_gram_lambda_hist"):
             mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_gram_lambda_hist")
@@ -237,6 +264,13 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
             plotted_axes.add("feat_gram_lambda")
         else:
             _warn_missing(run_name, "feature Gram lambda", "feat_gram_lambda_hist")
+        if _has_history(run_results_by_seed, "momentum_feat_gram_lambda_hist"):
+            mean, std, L = _mean_std_across_seeds(run_results_by_seed, "momentum_feat_gram_lambda_hist")
+            _plot_band(
+                axes["feat_gram_lambda"], base_x[:L], mean, std,
+                label=f"{run_name} momentum", color=c, linestyle=":"
+            )
+            plotted_axes.add("feat_gram_lambda")
 
         if _has_history(run_results_by_seed, "train_loss_hist"):
             mean, std, L = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
@@ -246,15 +280,37 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
             plotted_axes.update({"train_loss", "train_loss_with_lin"})
         else:
             _warn_missing(run_name, "training loss", "train_loss_hist")
+        if _has_history(run_results_by_seed, "momentum_train_loss_hist"):
+            mean, std, L = _mean_std_across_seeds(run_results_by_seed, "momentum_train_loss_hist")
+            x = base_x[:L]
+            _plot_band(
+                axes["train_loss"], x, mean, std,
+                label=f"{run_name} momentum", color=c, linestyle=":", lw=1.5,
+            )
+            _plot_band(
+                axes["train_loss_with_lin"], x, mean, std,
+                label=f"{run_name} momentum", color=c, linestyle=":", lw=1.5,
+            )
+            plotted_axes.update({"train_loss", "train_loss_with_lin"})
 
         if use_linearized:
             if _has_history(run_results_by_seed, "lin_train_loss_hist"):
                 mean, std, L = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
                 x = base_x[:L]
-                _plot_band(axes["train_loss_with_lin"], x, mean, std, label=f"{run_name} linear", color=c, lin=True, lw=1.5)
+                _plot_band(
+                    axes["train_loss_with_lin"], x, mean, std,
+                    label=f"{run_name} linear", color=c, linestyle="--", lw=1.5,
+                )
                 plotted_axes.add("train_loss_with_lin")
             else:
                 _warn_missing(run_name, "linearized training loss", "lin_train_loss_hist")
+            if _has_history(run_results_by_seed, "momentum_lin_train_loss_hist"):
+                mean, std, L = _mean_std_across_seeds(run_results_by_seed, "momentum_lin_train_loss_hist")
+                _plot_band(
+                    axes["train_loss_with_lin"], base_x[:L], mean, std,
+                    label=f"{run_name} momentum linear", color=c, linestyle="-.", lw=1.5,
+                )
+                plotted_axes.add("train_loss_with_lin")
 
     for k, ax in axes.items():
         ax.set_xlabel("Epoch")

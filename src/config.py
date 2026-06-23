@@ -30,6 +30,10 @@ class ExpConfig:
     regularization_scale: float = 1.0
     lam_fc1: Optional[float] = None
     lam_fc2: Optional[float] = None
+    compare_momentum: bool = False
+    momentum_discretization: str = "baoab"
+    momentum_h: Optional[float] = None
+    momentum_gamma: Optional[float] = None
     # early stopping & turning off noise
     noise_free_after_epoch: Optional[int] = None
     early_stop_metric: Optional[str] = None

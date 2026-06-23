@@ -16,6 +16,7 @@ import torch
 from .config import ExpConfig, RunOpts, save_checkpoint, load_checkpoint_with_metadata
 from .metric_config import METRIC_SCHEMA_VERSION, resolve_metric_plan
 from .training import MultiSeedWorkerArgs, TrainArgs, train_multiseed
+from .langevin import MOMENTUM_DISCRETIZATIONS
 
 Metrics = Dict[str, Any]
 ResultsByLabel = Dict[str, Dict[int, Metrics]]
@@ -72,6 +73,7 @@ def build_from_config_mapping(cfg: dict) -> tuple[ExpConfig, RunOpts]:
     exp_kwargs = _prepare_dataclass_kwargs(ExpConfig, exp_kwargs, ignored_fields=_IGNORED_LEGACY_EXP_FIELDS)
 
     exp_config = ExpConfig(**exp_kwargs)
+    _validate_momentum_config(exp_config)
 
     run_kwargs = _prepare_dataclass_kwargs(RunOpts, run_kwargs)
     _expand_path_arg(run_kwargs, "ckpt_dir")
@@ -80,6 +82,21 @@ def build_from_config_mapping(cfg: dict) -> tuple[ExpConfig, RunOpts]:
     run_opts = RunOpts(**run_kwargs)
 
     return exp_config, run_opts
+
+
+def _validate_momentum_config(config: ExpConfig) -> None:
+    algorithm = getattr(config, "momentum_discretization", "baoab")
+    if algorithm not in MOMENTUM_DISCRETIZATIONS:
+        choices = ", ".join(sorted(MOMENTUM_DISCRETIZATIONS))
+        raise ValueError(f"momentum_discretization must be one of {choices}; got {algorithm!r}")
+    if not getattr(config, "compare_momentum", False):
+        return
+    h = getattr(config, "momentum_h", None)
+    gamma = getattr(config, "momentum_gamma", None)
+    if h is None or not math.isfinite(float(h)) or float(h) <= 0.0:
+        raise ValueError("momentum_h must be explicitly set to a positive value when compare_momentum=True")
+    if gamma is None or not math.isfinite(float(gamma)) or float(gamma) < 0.0:
+        raise ValueError("momentum_gamma must be explicitly set to a non-negative value when compare_momentum=True")
 
 def _apply_config_overrides(base: ExpConfig, override_src: ExpConfig, override_keys: Optional[Iterable[str]]) -> ExpConfig:
     if not override_keys:
@@ -90,6 +107,8 @@ def _apply_config_overrides(base: ExpConfig, override_src: ExpConfig, override_k
             "eta_table_path",
             "regularization_scale", 
             "same_noise", 
+            "momentum_h",
+            "momentum_gamma",
             "noise_free_after_epoch",
             "early_stop_metric",
             "early_stop_goal",
@@ -106,7 +125,9 @@ def _apply_config_overrides(base: ExpConfig, override_src: ExpConfig, override_k
 
     if not kwargs:
         return base
-    return replace(base, **kwargs)
+    updated = replace(base, **kwargs)
+    _validate_momentum_config(updated)
+    return updated
 
 def _print_exp_config(
     exp_config: ExpConfig,
@@ -270,6 +291,7 @@ def _train_single_alpha_beta(
     resume_paths: Optional[Dict[int, str]] = None,
     epoch_offset: int = 0,
 ) -> Dict[int, Metrics]:
+    _validate_momentum_config(config)
     metric_plan = _resolve_metric_plan_for_config(config)
     train_args = TrainArgs(
         eta=_resolve_eta(config, alpha=alpha, beta=beta),
@@ -283,6 +305,10 @@ def _train_single_alpha_beta(
         regularization_scale=config.regularization_scale,
         use_linearized=config.use_linearized,
         same_noise=config.same_noise,
+        compare_momentum=config.compare_momentum,
+        momentum_discretization=config.momentum_discretization,
+        momentum_h=config.momentum_h,
+        momentum_gamma=config.momentum_gamma,
         jac_probe_size=config.jac_probe_size,
         device=config.device,
         track_every=config.track_every,
@@ -329,6 +355,7 @@ def _tune_eta_for_pair(
     cfg.early_stop_metric = None
     cfg.early_stop_value = None
     cfg.early_stop_goal = "min"
+    cfg.compare_momentum = False
     if cfg.tracked_metrics is not None and metric_name not in cfg.tracked_metrics:
         cfg.tracked_metrics = list(cfg.tracked_metrics) + [metric_name]
 
@@ -511,6 +538,10 @@ def _write_base_ckpt_data_for_beta_to_disk(
             "init_model_state_dict": metrics["init_model_state_dict"],
             "start_model_state_dict": metrics["model_state_dict"],
             "start_lin_params": metrics.get("lin_params_state"),
+            "start_momentum_model_state_dict": metrics.get("momentum_model_state_dict"),
+            "start_momentum_lin_params": metrics.get("momentum_lin_params_state"),
+            "start_momentum_buffers": metrics.get("momentum_buffers_state"),
+            "start_momentum_lin_buffers": metrics.get("momentum_lin_buffers_state"),
             "rng_state": metrics.get("rng_state"),
             "last_epoch": metrics.get("last_epoch"),
             "stopped_early": metrics.get("stopped_early", False),
@@ -618,7 +649,14 @@ def _merge_metrics(base: Mapping[str, Any], extra: Mapping[str, Any]) -> Dict[st
                 raise ValueError("Metric histogram concatenation failed.")
         elif k == "init_model_state_dict":
             merged[k] = b
-        elif k in {"model_state_dict", "lin_params_state"}:
+        elif k in {
+            "model_state_dict",
+            "lin_params_state",
+            "momentum_model_state_dict",
+            "momentum_lin_params_state",
+            "momentum_buffers_state",
+            "momentum_lin_buffers_state",
+        }:
             if b is not None and e is None:
                 raise ValueError(f"New run is missing {k} while base run has it.")
             merged[k] = e if e is not None else b
