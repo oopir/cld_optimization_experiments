@@ -620,8 +620,8 @@ def _make_training_curves_figure(
     """
     Build metric-vs-training-step small multiples.
 
-    Panels are fixed by `beta`. Within each panel, every `(n, m)` pair gets a
-    line: color encodes `m`, and marker shape encodes `n`.
+    Panels are fixed by `(n, beta)`: one row per sample size and one column per
+    beta value. Within each panel, color encodes `m`.
     """
     mean_key = f"{metric_name}_mean"
     rows = [row for row in summary_rows if mean_key in row]
@@ -635,10 +635,10 @@ def _make_training_curves_figure(
     if not step_values:
         return None
 
-    fig_width = max(4.0 * len(beta_values) + 1.2, 5.0)
-    fig_height = 3.8
+    fig_width = max(3.4 * len(beta_values) + 1.0, 4.6)
+    fig_height = max(2.25 * len(n_values) + 1.0, 3.4)
     fig, axes = plt.subplots(
-        1,
+        len(n_values),
         len(beta_values),
         figsize=(fig_width, fig_height),
         squeeze=False,
@@ -648,20 +648,16 @@ def _make_training_curves_figure(
     )
     colors = plt.cm.viridis(np.linspace(0.1, 0.9, max(len(m_values), 1)))
     color_by_m = {m_value: colors[idx] for idx, m_value in enumerate(m_values)}
-    marker_shapes = ("o", "D", "^", "s", "v", "P", "X", "*", "<", ">")
-    marker_by_n = {n_value: marker_shapes[idx % len(marker_shapes)] for idx, n_value in enumerate(n_values)}
-    seen_n_values = set()
     seen_m_values = set()
 
-    for col_idx, beta in enumerate(beta_values):
-        ax = axes[0][col_idx]
-        panel_rows = [row for row in rows if row["beta"] == beta]
-        for n in n_values:
-            n_rows = [row for row in panel_rows if row["n"] == n]
+    for row_idx, n in enumerate(n_values):
+        for col_idx, beta in enumerate(beta_values):
+            ax = axes[row_idx][col_idx]
+            panel_rows = [row for row in rows if row["n"] == n and row["beta"] == beta]
             for m in m_values:
                 line_rows = sorted(
                     [
-                        row for row in n_rows
+                        row for row in panel_rows
                         if row["m"] == m and np.isfinite(float(row[mean_key]))
                     ],
                     key=lambda row: _sort_key(row["training_steps"]),
@@ -671,49 +667,28 @@ def _make_training_curves_figure(
                 ax.plot(
                     np.asarray([float(row["training_steps"]) for row in line_rows], dtype=float),
                     np.asarray([float(row[mean_key]) for row in line_rows], dtype=float),
-                    marker=marker_by_n[n],
-                    linewidth=1.3,
+                    marker="o",
+                    linewidth=1.8,
                     markersize=4.0,
                     color=color_by_m[m],
                     linestyle="-",
-                    label=f"n={_format_value(n)}, m={_format_value(m)}",
+                    label=f"m={_format_value(m)}",
                 )
-                seen_n_values.add(n)
                 seen_m_values.add(m)
 
-        ax.set_title(f"beta={_format_value(beta)}", fontsize=9)
-        ax.set_xticks([float(value) for value in step_values])
-        ax.set_xticklabels([_format_value(value) for value in step_values])
-        ax.grid(False)
-        ax.set_xlabel(_axis_label("training_steps"))
-        if col_idx == 0:
-            ax.set_ylabel(_metric_label(metric_name))
+            if row_idx == 0:
+                ax.set_title(f"beta={_format_value(beta)}", fontsize=9)
+            ax.set_xticks([float(value) for value in step_values])
+            ax.set_xticklabels([_format_value(value) for value in step_values])
+            ax.grid(False)
+            if row_idx == len(n_values) - 1:
+                ax.set_xlabel(_axis_label("training_steps"))
+            if col_idx == 0:
+                ax.set_ylabel(f"n={_format_value(n)}", rotation=0, labelpad=28, va="center")
 
-    if seen_n_values:
-        n_handles = [
-            Line2D(
-                [0],
-                [0],
-                color="0.25",
-                marker=marker_by_n[n],
-                linestyle="None",
-                markersize=5,
-            )
-            for n in n_values
-            if n in seen_n_values
-        ]
-        n_labels = [f"n={_format_value(n)}" for n in n_values if n in seen_n_values]
-        n_legend = fig.legend(
-            n_handles,
-            n_labels,
-            loc="outside right upper",
-            frameon=False,
-            title="sample size",
-        )
-        fig.add_artist(n_legend)
     if seen_m_values:
         m_handles = [
-            Line2D([0], [0], color=color_by_m[m], linestyle="-", linewidth=1.6)
+            Line2D([0], [0], color=color_by_m[m], marker="o", linestyle="-", linewidth=2.0, markersize=5)
             for m in m_values
             if m in seen_m_values
         ]
@@ -721,11 +696,12 @@ def _make_training_curves_figure(
         fig.legend(
             m_handles,
             m_labels,
-            loc="outside right lower",
+            loc="outside right upper",
             frameon=False,
             title="width",
         )
     fig.suptitle(f"{_metric_label(metric_name)} vs training steps", fontsize=13)
+    fig.text(0.01, 0.5, _metric_label(metric_name), va="center", rotation="vertical", fontsize=10)
     return fig
 
 
