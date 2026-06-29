@@ -1,0 +1,64 @@
+probe:
+  dataset: mnist
+  random_labels: true
+
+  # n_values: [2048, 4096, 8192]
+  n_values: [2048]
+  m_values: [2048, 4096, 8192]
+  # m_values: [16384]
+  beta_values: [5000, 20000, inf]
+  # beta_values: [250]
+  training_step_values: [0, 200, 500, 1000, 2500, 5000, 10000]
+  # training_step_values: [0, 200, 500]
+  eta: 0.0005
+  init_type: standard
+
+  num_data_seeds: 4
+  # num_data_seeds: 1
+  data_seed_start: 0
+  num_inits: 16
+  # num_inits: 5
+  init_seed_start: 0
+
+  device: cuda
+  gpu_ids: [0,1]
+  batch_size: 4096
+  jacobian_batch_size: 1024
+  parallel: true
+  init_chunk_size: 4
+  adaptive_gpu_packing: true
+  max_workers_per_gpu: 4
+  gpu_memory_safety_fraction: 0.85
+
+  progress_interval_seconds: 120
+  progress_detail: summary
+
+  # ntk_label_energy_k_values: [5, 25, 50, 100]
+  tracked_metrics:
+    - empirical_loss
+    - ntk_eig_min
+    - ntk_eig_mean
+    - ntk_eig_median
+    - ntk_eig_max
+    - residual_ntk_alignment
+    - residual_ntk_alignment_over_ntk_eig_min
+    - residual_ntk_alignment_over_ntk_eig_mean
+    - residual_ntk_alignment_over_ntk_eig_max
+    - loss_weighted_residual_ntk_alignment
+    - loss_weighted_ntk_eig_min
+  plot_metrics:
+    - empirical_loss
+    - ntk_eig_min
+    - ntk_eig_mean
+    - ntk_eig_median
+    - ntk_eig_max
+    - residual_ntk_alignment
+    - residual_ntk_alignment_over_ntk_eig_min
+    - residual_ntk_alignment_over_ntk_eig_mean
+    - residual_ntk_alignment_over_ntk_eig_max
+    - loss_weighted_residual_ntk_alignment
+    - loss_weighted_ntk_eig_min
+  plot_format: combined
+  plot_heatmaps: false
+
+  output_dir: plots/init_scale_probe/debug_ntk_t

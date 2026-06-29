@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import matplotlib
 
@@ -26,6 +26,34 @@ LEGACY_METRICS = (
 )
 
 INITIALIZATION_FIXED_AXES = ("alpha", "beta", "training_steps", "synthetic_anisotropy_power")
+NTK_SPECTRUM_GROUP_METRICS = (
+    "ntk_eig_min",
+    "ntk_eig_mean",
+    "ntk_eig_median",
+    "ntk_eig_max",
+)
+RESIDUAL_NTK_ALIGNMENT_GROUP_METRICS = (
+    "residual_ntk_alignment",
+    "residual_ntk_alignment_over_ntk_eig_min",
+    "residual_ntk_alignment_over_ntk_eig_mean",
+    "residual_ntk_alignment_over_ntk_eig_max",
+)
+LOSS_WEIGHTED_NTK_GROUP_PAIRS = (
+    ("residual_ntk_alignment", "loss_weighted_residual_ntk_alignment"),
+    ("ntk_eig_min", "loss_weighted_ntk_eig_min"),
+)
+LOSS_WEIGHTED_NTK_GROUP_METRICS = tuple(name for pair in LOSS_WEIGHTED_NTK_GROUP_PAIRS for name in pair)
+NTK_ALIGNMENT_DYNAMICS_GROUP_METRICS = (
+    "residual_ntk_alignment_residual_dynamics_term",
+    "residual_ntk_alignment_ntk_dynamics_term",
+)
+GROUPED_METRIC_PDFS = (
+    ("ntk_spectrum_metrics", NTK_SPECTRUM_GROUP_METRICS),
+    ("ntk_label_energy_metrics", "ntk_label_energy_top_"),
+    ("residual_ntk_alignment_metrics", RESIDUAL_NTK_ALIGNMENT_GROUP_METRICS),
+    ("loss_weighted_ntk_metrics", LOSS_WEIGHTED_NTK_GROUP_METRICS),
+    ("ntk_alignment_dynamics_terms", NTK_ALIGNMENT_DYNAMICS_GROUP_METRICS),
+)
 
 
 # -------------------------------------------------------------------------- #
@@ -42,7 +70,7 @@ def plot_probe_summaries(
     """Create all configured plot outputs from the already-aggregated summary rows."""
     paths: Dict[str, Path] = {}
     output_dir.mkdir(parents=True, exist_ok=True)
-    _clear_probe_plot_files(output_dir)
+    _clear_probe_plot_files(output_dir, metric_names=config.plot_metrics)
     if not summary_rows:
         return paths
 
@@ -67,11 +95,14 @@ def plot_probe_summaries(
         )
         return paths
 
+    grouped_metrics = _grouped_metric_names(config.plot_metrics)
+    grouped_metric_names = {name for names in grouped_metrics.values() for name in names}
+
     for metric_name in config.plot_metrics:
         if f"{metric_name}_mean" not in summary_rows[0]:
             continue
 
-        if config.plot_format in {"combined", "both"}:
+        if config.plot_format in {"combined", "both"} and metric_name not in grouped_metric_names:
             path = output_dir / f"{metric_name}.pdf"
             figures: List[Optional[plt.Figure]] = [_make_training_curves_figure(summary_rows, metric_name)]
             if config.plot_heatmaps:
@@ -87,6 +118,9 @@ def plot_probe_summaries(
                 heatmap_path = output_dir / f"{metric_name}_nm_heatmaps.pdf"
                 if _save_figure_pdf(_make_nm_heatmaps_figure(summary_rows, metric_name), heatmap_path):
                     paths[f"plot_{metric_name}_nm_heatmaps"] = heatmap_path
+
+    if config.plot_format in {"combined", "both"}:
+        paths.update(_plot_grouped_training_metric_pdfs(summary_rows, config, output_dir, grouped_metrics))
 
     paths.update(
         _plot_anisotropy_summaries(
@@ -107,6 +141,69 @@ def _is_initialization_only(config: InitScaleProbeConfig) -> bool:
 def _has_anisotropy_sweep(config: InitScaleProbeConfig) -> bool:
     """Return True when synthetic anisotropy power is an active sweep axis."""
     return len(tuple(config.synthetic_anisotropy_powers or [])) > 1
+
+
+def _grouped_metric_names(metric_names: Sequence[str]) -> Dict[str, List[str]]:
+    """Return configured metric groups that should be written as grouped PDFs."""
+    requested = set(metric_names)
+    groups: Dict[str, List[str]] = {file_stem: [] for file_stem, _ in GROUPED_METRIC_PDFS}
+    for metric_name in metric_names:
+        for file_stem, matcher in GROUPED_METRIC_PDFS:
+            if file_stem == "loss_weighted_ntk_metrics":
+                continue
+            if isinstance(matcher, str):
+                matches = metric_name.startswith(matcher)
+            else:
+                matches = metric_name in matcher
+            if matches:
+                groups[file_stem].append(metric_name)
+                break
+    # Pair each loss-weighted average with its unweighted counterpart for direct comparison.
+    for pair in LOSS_WEIGHTED_NTK_GROUP_PAIRS:
+        if any(metric_name in requested for metric_name in pair):
+            groups["loss_weighted_ntk_metrics"].extend(pair)
+    return {file_stem: names for file_stem, names in groups.items() if names}
+
+
+def _plot_grouped_training_metric_pdfs(
+    summary_rows: Sequence[Mapping[str, Any]],
+    config: InitScaleProbeConfig,
+    output_dir: Path,
+    grouped_metrics: Mapping[str, Sequence[str]],
+) -> Dict[str, Path]:
+    """Create grouped training-sweep PDFs with one metric per page."""
+    paths: Dict[str, Path] = {}
+    for file_stem, metric_names in grouped_metrics.items():
+        curve_figures: List[Optional[plt.Figure]] = []
+        heatmap_figures: List[Optional[plt.Figure]] = []
+        for metric_name in metric_names:
+            if f"{metric_name}_mean" not in summary_rows[0]:
+                continue
+            curve_figures.append(_make_training_curves_figure(summary_rows, metric_name))
+            if config.plot_heatmaps:
+                heatmap_figures.append(_make_nm_heatmaps_figure(summary_rows, metric_name))
+        path = output_dir / f"{file_stem}.pdf"
+        if _save_figures_pdf_equal_width(curve_figures, path):
+            paths[f"plot_{file_stem}"] = path
+        if config.plot_heatmaps:
+            heatmap_path = output_dir / f"{file_stem}_nm_heatmaps.pdf"
+            if _save_figures_pdf_equal_width(heatmap_figures, heatmap_path):
+                paths[f"plot_{file_stem}_nm_heatmaps"] = heatmap_path
+    return paths
+
+
+def _save_grouped_metric_pdfs(
+    grouped_metrics: Mapping[str, Sequence[str]],
+    output_dir: Path,
+    figure_factory: Callable[[Sequence[str]], Sequence[Optional[plt.Figure]]],
+) -> Dict[str, Path]:
+    """Save grouped metric-family PDFs using one shared figure factory."""
+    paths: Dict[str, Path] = {}
+    for file_stem, metric_names in grouped_metrics.items():
+        path = output_dir / f"{file_stem}.pdf"
+        if _save_figures_pdf_equal_width(figure_factory(metric_names), path):
+            paths[f"plot_{file_stem}"] = path
+    return paths
 
 
 def _plot_initialization_only_summaries(
@@ -134,6 +231,19 @@ def _plot_initialization_only_summaries(
         )
         if _save_figures_pdf(figures, path):
             paths["plot_nm_metrics"] = path
+        paths.update(
+            _save_grouped_metric_pdfs(
+                _grouped_metric_names(config.plot_metrics),
+                output_dir,
+                lambda metric_names: _make_initialization_metrics_figures(
+                    data_avg_init_var_rows,
+                    init_avg_data_var_rows,
+                    metric_names,
+                    plot_heatmaps=config.plot_heatmaps,
+                    title_suffix=_label_state_from_bool(config.random_labels),
+                ),
+            )
+        )
 
     for metric_name in config.plot_metrics:
         if f"{metric_name}_mean" not in data_avg_init_var_rows[0] or f"{metric_name}_mean" not in init_avg_data_var_rows[0]:
@@ -434,9 +544,23 @@ def _plot_anisotropy_summaries(
         title_suffix=_label_state_from_bool(config.random_labels),
     )
     path = output_dir / "anisotropy_metrics.pdf"
+    paths: Dict[str, Path] = {}
     if _save_figures_pdf(figures, path):
-        return {"plot_anisotropy_metrics": path}
-    return {}
+        paths["plot_anisotropy_metrics"] = path
+    paths.update(
+        _save_grouped_metric_pdfs(
+            _grouped_metric_names(config.plot_metrics),
+            output_dir,
+            lambda metric_names: _make_anisotropy_metrics_figures(
+                data_avg_init_var_rows,
+                init_avg_data_var_rows,
+                metric_names,
+                config.plot_heatmaps,
+                title_suffix=_label_state_from_bool(config.random_labels),
+            ),
+        )
+    )
+    return paths
 
 
 def _make_anisotropy_metrics_figures(
@@ -685,6 +809,8 @@ def _make_training_curves_figure(
                 ax.set_xlabel(_axis_label("training_steps"))
             if col_idx == 0:
                 ax.set_ylabel(f"n={_format_value(n)}", rotation=0, labelpad=28, va="center")
+            if _uses_zero_reference_line(metric_name):
+                ax.axhline(0.0, color="0.35", linewidth=0.8, linestyle="--", alpha=0.8)
 
     if seen_m_values:
         m_handles = [
@@ -739,7 +865,7 @@ def _make_nm_heatmaps_figure(
     if finite_values.size == 0:
         return None
 
-    use_log = bool(np.all(finite_values > 0))
+    use_log = bool(np.all(finite_values > 0)) and not _is_ntk_label_energy_metric(metric_name)
     transformed = [
         (n, step, np.log10(matrix) if use_log else matrix, m_values, beta_panel_values)
         for n, step, matrix, m_values, beta_panel_values in panels
@@ -914,16 +1040,47 @@ def _save_figures_pdf(figures: Sequence[Optional[plt.Figure]], path: Path) -> bo
     return True
 
 
-def _clear_probe_plot_files(output_dir: Path) -> None:
+def _save_figures_pdf_equal_width(figures: Sequence[Optional[plt.Figure]], path: Path) -> bool:
+    """Save figures as a multipage PDF after normalizing page widths."""
+    valid_figures = [fig for fig in figures if fig is not None]
+    if not valid_figures:
+        return False
+    max_width = max(float(fig.get_figwidth()) for fig in valid_figures)
+    for fig in valid_figures:
+        fig.set_size_inches(max_width, fig.get_figheight(), forward=True)
+    with PdfPages(path) as pdf:
+        for fig in valid_figures:
+            pdf.savefig(fig)
+            plt.close(fig)
+    return True
+
+
+def _clear_probe_plot_files(output_dir: Path, metric_names: Sequence[str] = ()) -> None:
     """Remove stale PDF plots from all generations of this probe."""
     for path in (
         output_dir / "anisotropy_metrics.pdf",
         output_dir / "initialization_metrics.pdf",
         output_dir / "nm_metrics.pdf",
+        output_dir / "ntk_spectrum_metrics.pdf",
+        output_dir / "ntk_spectrum_metrics_nm_heatmaps.pdf",
+        output_dir / "ntk_eig_metrics.pdf",
+        output_dir / "ntk_eig_metrics_nm_heatmaps.pdf",
+        output_dir / "ntk_label_energy_metrics.pdf",
+        output_dir / "ntk_label_energy_metrics_nm_heatmaps.pdf",
+        output_dir / "residual_ntk_alignment_metrics.pdf",
+        output_dir / "residual_ntk_alignment_metrics_nm_heatmaps.pdf",
+        output_dir / "loss_weighted_ntk_metrics.pdf",
+        output_dir / "loss_weighted_ntk_metrics_nm_heatmaps.pdf",
+        output_dir / "ntk_alignment_dynamics_terms.pdf",
+        output_dir / "ntk_alignment_dynamics_terms_nm_heatmaps.pdf",
+        output_dir / "ntk_loss_product_metrics.pdf",
+        output_dir / "ntk_loss_product_metrics_nm_heatmaps.pdf",
+        output_dir / "ntk_loss_weighted_metrics.pdf",
+        output_dir / "ntk_loss_weighted_metrics_nm_heatmaps.pdf",
     ):
         if path.exists():
             path.unlink()
-    for metric_name in ALL_METRICS + LEGACY_METRICS:
+    for metric_name in tuple(dict.fromkeys((*ALL_METRICS, *LEGACY_METRICS, *metric_names))):
         for axis in SWEEP_AXES:
             for path in (
                 output_dir / f"{metric_name}_vs_{axis}.pdf",
@@ -943,6 +1100,8 @@ def _clear_probe_plot_files(output_dir: Path) -> None:
                 path.unlink()
         for path in output_dir.glob(f"{metric_name}_heatmap_*.pdf"):
             path.unlink()
+    for path in output_dir.glob("ntk_label_energy_top_*.pdf"):
+        path.unlink()
 
 
 def _unique_values(rows: Sequence[Mapping[str, Any]], axis: Optional[str]) -> Tuple[Any, ...]:
@@ -965,10 +1124,35 @@ def _metric_label(name: str) -> str:
         "empirical_loss_grad_norm_fc2_normalized": "empirical loss grad norm fc2 / sqrt(m)",
         "fc1_weight_fro_norm_normalized": "fc1 weight fro norm / sqrt(m)",
         "fc1_weight_spectral_norm_normalized": "fc1 weight spectral norm / (1 + sqrt(m/d_in))",
+        "ntk_eig_min": "ntk eig min",
+        "ntk_eig_max": "ntk eig max",
+        "ntk_eig_mean": "ntk eig mean",
+        "ntk_eig_median": "ntk eig median",
+        "residual_ntk_alignment": "residual NTK alignment",
+        "residual_ntk_alignment_over_ntk_eig_min": "residual NTK alignment / ntk eig min",
+        "residual_ntk_alignment_over_ntk_eig_mean": "residual NTK alignment / ntk eig mean",
+        "residual_ntk_alignment_over_ntk_eig_max": "residual NTK alignment / ntk eig max",
+        "empirical_loss_times_residual_ntk_alignment": "empirical loss * residual NTK alignment",
+        "empirical_loss_times_ntk_eig_min": "empirical loss * ntk eig min",
+        "loss_weighted_residual_ntk_alignment": "loss-weighted residual NTK alignment",
+        "loss_weighted_ntk_eig_min": "loss-weighted ntk eig min",
+        "residual_ntk_alignment_residual_dynamics_term": "residual dynamics term",
+        "residual_ntk_alignment_ntk_dynamics_term": "NTK dynamics term",
     }
     if name in normalized_labels:
         return normalized_labels[name]
+    if _is_ntk_label_energy_metric(name):
+        return f"E_t(y, k={name.rsplit('_', 1)[-1]})"
     return name.replace("_", " ")
+
+
+def _is_ntk_label_energy_metric(name: str) -> bool:
+    prefix = "ntk_label_energy_top_"
+    return name.startswith(prefix) and name[len(prefix):].isdigit()
+
+
+def _uses_zero_reference_line(metric_name: str) -> bool:
+    return metric_name in NTK_ALIGNMENT_DYNAMICS_GROUP_METRICS
 
 
 def _metric_label_parts(name: str) -> Tuple[str, str]:

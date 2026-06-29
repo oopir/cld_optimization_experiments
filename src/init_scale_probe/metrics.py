@@ -1,5 +1,5 @@
 import math
-from typing import Dict, Sequence
+from typing import Dict, Optional, Sequence, Tuple
 
 import torch
 
@@ -52,8 +52,124 @@ BINARY_PARAMETER_METRICS = (
     "fc1_weight_spectral_norm_normalized",
 )
 
-BINARY_ALL_METRICS = BINARY_CORE_METRICS + BINARY_LAYERWISE_METRICS + BINARY_PARAMETER_METRICS
+PROBE_NTK_EIGEN_METRICS = (
+    "ntk_eig_min",
+    "ntk_eig_max",
+    "ntk_eig_mean",
+    "ntk_eig_median",
+)
+
+PROBE_NTK_ALIGNMENT_METRICS = (
+    "residual_ntk_alignment",
+    "residual_ntk_alignment_over_ntk_eig_min",
+    "residual_ntk_alignment_over_ntk_eig_mean",
+    "residual_ntk_alignment_over_ntk_eig_max",
+    "empirical_loss_times_residual_ntk_alignment",
+    "empirical_loss_times_ntk_eig_min",
+    "residual_ntk_alignment_residual_dynamics_term",
+    "residual_ntk_alignment_ntk_dynamics_term",
+)
+PROBE_NTK_MATRIX_METRICS = PROBE_NTK_EIGEN_METRICS + (
+    "residual_ntk_alignment",
+    "residual_ntk_alignment_over_ntk_eig_min",
+    "residual_ntk_alignment_over_ntk_eig_mean",
+    "residual_ntk_alignment_over_ntk_eig_max",
+    "empirical_loss_times_residual_ntk_alignment",
+    "empirical_loss_times_ntk_eig_min",
+    "residual_ntk_alignment_residual_dynamics_term",
+)
+PROBE_NTK_HVP_METRICS = (
+    "residual_ntk_alignment_ntk_dynamics_term",
+)
+
+PROBE_NTK_LABEL_ENERGY_PREFIX = "ntk_label_energy_top_"
+PROBE_NTK_STATIC_METRICS = PROBE_NTK_EIGEN_METRICS + PROBE_NTK_ALIGNMENT_METRICS
+PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES = {
+    "loss_weighted_residual_ntk_alignment": ("empirical_loss", "empirical_loss_times_residual_ntk_alignment"),
+    "loss_weighted_ntk_eig_min": ("empirical_loss", "empirical_loss_times_ntk_eig_min"),
+}
+PROBE_NTK_LOSS_WEIGHTED_AVERAGE_METRICS = tuple(PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES)
+PROBE_NTK_LOSS_WEIGHTED_AVERAGE_BASE_METRICS = {
+    "loss_weighted_residual_ntk_alignment": "residual_ntk_alignment",
+    "loss_weighted_ntk_eig_min": "ntk_eig_min",
+}
+
+BINARY_DEFAULT_METRICS = BINARY_CORE_METRICS + BINARY_LAYERWISE_METRICS + BINARY_PARAMETER_METRICS
+BINARY_ALL_METRICS = BINARY_DEFAULT_METRICS + PROBE_NTK_STATIC_METRICS
 BINARY_GRADIENT_METRICS = BINARY_OUTPUT_GRAD_METRICS + BINARY_EMPIRICAL_LOSS_GRAD_METRICS
+
+
+def append_k_to_ntk_label_energy_metric(k: int) -> str:
+    return f"{PROBE_NTK_LABEL_ENERGY_PREFIX}{int(k)}"
+
+
+def parse_ntk_label_energy_metric(name: str) -> Optional[int]:
+    if not name.startswith(PROBE_NTK_LABEL_ENERGY_PREFIX):
+        return None
+    suffix = name[len(PROBE_NTK_LABEL_ENERGY_PREFIX):]
+    if not suffix.isdigit():
+        return None
+    k = int(suffix)
+    return k if k > 0 else None
+
+
+def is_ntk_metric(name: str) -> bool:
+    return name in PROBE_NTK_STATIC_METRICS or parse_ntk_label_energy_metric(name) is not None
+
+
+def ntk_metric_needs_matrix(name: str) -> bool:
+    return name in PROBE_NTK_MATRIX_METRICS or parse_ntk_label_energy_metric(name) is not None
+
+
+def ntk_metric_needs_hvp(name: str) -> bool:
+    return name in PROBE_NTK_HVP_METRICS
+
+
+def is_ntk_loss_weighted_average_metric(name: str) -> bool:
+    return name in PROBE_NTK_LOSS_WEIGHTED_AVERAGE_METRICS
+
+
+def ntk_loss_weighted_average_dependencies(name: str) -> Optional[Tuple[str, ...]]:
+    return PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES.get(name)
+
+
+def ntk_loss_weighted_average_base_metric(name: str) -> Optional[str]:
+    return PROBE_NTK_LOSS_WEIGHTED_AVERAGE_BASE_METRICS.get(name)
+
+
+def _output_scale(model) -> float:
+    return 1.0 / float(model.alpha) if model.init_type == "alpha" and model.alpha != 0 else 1.0
+
+
+def _activation_and_derivative(z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Return tanh(z) and its derivative."""
+    h = torch.tanh(z)
+    return h, 1.0 - h.pow(2)
+
+
+def _safe_ratio(numerator: torch.Tensor, denominator: torch.Tensor) -> float:
+    if float(denominator.detach().item()) == 0.0:
+        return float("nan")
+    return float((numerator / denominator).detach().item())
+
+
+def _metric_or_nan(value: Optional[torch.Tensor]) -> float:
+    return float("nan") if value is None else float(value.detach().item())
+
+
+@torch.no_grad()
+def _binary_hidden_forward(
+    model,
+    X: torch.Tensor,
+    y: Optional[torch.Tensor] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    """Return scalar hidden features, outputs, activation derivatives, and optional residuals."""
+    W1 = model.fc1.weight.detach()
+    W2 = model.fc2.weight.detach().view(-1)
+    h, activation_derivative = _activation_and_derivative(X @ W1.T)
+    out = _output_scale(model) * (h @ W2).view(-1)
+    residual = None if y is None else out - y.view(-1)
+    return h, out, activation_derivative, residual
 
 
 @torch.no_grad()
@@ -89,9 +205,8 @@ def _compute_binary_forward_metrics(
         if not needs_output:
             continue
 
-        out = model.fc2(torch.tanh(z))
-        if model.init_type == "alpha" and model.alpha != 0:
-            out = out / model.alpha
+        h, _ = _activation_and_derivative(z)
+        out = _output_scale(model) * model.fc2(h)
         out = out.view(-1, 1)
 
         if "mean_abs_output" in metric_names:
@@ -132,7 +247,7 @@ def _compute_binary_parameter_metrics(
             out["fc1_weight_spectral_norm_normalized"] = spectral_norm / spectral_scale
     return out
 
-
+# TODO: Simplify this control flow when revisiting the binary gradient metrics.
 @torch.no_grad()
 def _compute_binary_gradient_metrics(
     model,
@@ -144,14 +259,13 @@ def _compute_binary_gradient_metrics(
     """
     Compute exact scalar-output parameter-gradient norms for the current model.
 
-    For f(x) = scale * fc2(tanh(fc1(x))) with no biases:
+    For f(x) = scale * fc2(phi(fc1(x))) with no biases:
       ||grad_fc2 f(x)||^2 = scale^2 * ||h||^2
-      ||grad_fc1 f(x)||^2 = scale^2 * ||x||^2 *
-          sum_j fc2_j^2 * (1 - h_j^2)^2
+      ||grad_fc1 f(x)||^2 = scale^2 * ||x||^2 * sum_j fc2_j^2 * phi'(z_j)^2
     """
     W1 = model.fc1.weight.detach()
     W2 = model.fc2.weight.detach().view(-1)
-    scale = 1.0 / float(model.alpha) if model.init_type == "alpha" and model.alpha != 0 else 1.0
+    scale = _output_scale(model)
     scale_sq = scale * scale
     sqrt_m = math.sqrt(float(model.m))
     n = X.shape[0]
@@ -170,9 +284,7 @@ def _compute_binary_gradient_metrics(
         xb = X[start:end]
 
         z = xb @ W1.T
-        h = torch.tanh(z)
-
-        one_minus_h2 = 1.0 - h.pow(2)
+        h, activation_derivative = _activation_and_derivative(z)
         fc1_out_grad_sq = None
         fc2_out_grad_sq = None
         total_out_grad_sq = None
@@ -180,8 +292,7 @@ def _compute_binary_gradient_metrics(
         if needs_output_grad:
             x_norm_sq = xb.pow(2).sum(dim=1)
             fc2_out_grad_sq = scale_sq * h.pow(2).sum(dim=1)
-            fc1_weighted_sq = (W2.pow(2).view(1, -1) * one_minus_h2.pow(2)).sum(dim=1)
-            fc1_out_grad_sq = scale_sq * x_norm_sq * fc1_weighted_sq
+            fc1_out_grad_sq = scale_sq * x_norm_sq * (W2.pow(2).view(1, -1) * activation_derivative.pow(2)).sum(dim=1)
             total_out_grad_sq = fc1_out_grad_sq + fc2_out_grad_sq
 
         if needs_output_grad:
@@ -202,7 +313,7 @@ def _compute_binary_gradient_metrics(
             residual = scale * (h @ W2).view(-1) - yb
             coeff = 2.0 * residual * scale
             emp_fc2_sum += (coeff.view(-1, 1) * h).sum(dim=0)
-            emp_fc1_batch = coeff.view(-1, 1) * W2.view(1, -1) * one_minus_h2
+            emp_fc1_batch = coeff.view(-1, 1) * W2.view(1, -1) * activation_derivative
             emp_fc1_sum += emp_fc1_batch.T @ xb
 
     out = {name: value / n for name, value in totals.items()}
@@ -226,6 +337,218 @@ def _compute_binary_gradient_metrics(
     return out
 
 
+@torch.no_grad()
+def _compute_ntk_matrix(
+    model,
+    X: torch.Tensor,
+    h: torch.Tensor,
+    activation_derivative: torch.Tensor,
+    batch_size: int,
+) -> torch.Tensor:
+    """
+    Compute the raw scalar two-layer activation NTK on the full dataset.
+
+    For f(x) = s * W2 phi(W1 x), no biases:
+      K_ij = s^2 * [h_i^T h_j + (x_i^T x_j) * sum_a W2_a^2 phi'(z_ia) phi'(z_ja)].
+    """
+    W2 = model.fc2.weight.detach().view(-1)
+    scale = _output_scale(model)
+    scale_sq = scale * scale
+    n = X.shape[0]
+    batch_size = max(1, int(batch_size))
+
+    weighted_derivatives = activation_derivative * W2.pow(2).view(1, -1)
+
+    K = torch.empty((n, n), device=X.device, dtype=X.dtype)
+    for start in range(0, n, batch_size):
+        end = min(start + batch_size, n)
+        hidden_gram = h[start:end] @ h.T
+        input_gram = X[start:end] @ X.T
+        derivative_gram = weighted_derivatives[start:end] @ activation_derivative.T
+        K[start:end] = scale_sq * (hidden_gram + input_gram * derivative_gram)
+    return 0.5 * (K + K.T)
+
+
+def _dot_param_lists(left: Sequence[torch.Tensor], right: Sequence[torch.Tensor]) -> torch.Tensor:
+    total = None
+    for a, b in zip(left, right):
+        term = (a * b).sum()
+        total = term if total is None else total + term
+    if total is None:
+        raise ValueError("Cannot take a parameter-list dot product over an empty list.")
+    return total
+
+
+def _sorted_median(values: torch.Tensor) -> torch.Tensor:
+    n = int(values.numel())
+    if n == 0:
+        return torch.tensor(float("nan"), device=values.device, dtype=values.dtype)
+    mid = n // 2
+    if n % 2 == 1:
+        return values[mid]
+    return 0.5 * (values[mid - 1] + values[mid])
+
+
+def _compute_ntk_alignment_ntk_dynamics_term(model, X: torch.Tensor, residual: torch.Tensor) -> float:
+    """
+    Compute the NTK-dynamics term in d/dt [u^T K u], holding r and u fixed.
+    With u     = r / ||r||,
+         J^T u = grad_theta(u^T f), and
+         H_r   = grad_theta^2(r^T f) = sum_i r_i grad_theta^2 f_i,
+    this returns D_ntk = -(2/n) (J^T u)^T H_r (J^T u).
+    This is the second term in dA/dt.
+    """
+    n = X.shape[0]
+    denom = residual.pow(2).sum().detach()
+    if float(denom.item()) <= 0.0:
+        return float("nan")
+
+    params = [p for p in model.parameters() if p.requires_grad]
+    if not params:
+        return float("nan")
+
+    residual_detached = residual.detach()
+    u_detached = residual_detached / torch.sqrt(denom)
+    f = model(X).view(-1)
+    ut_f = (u_detached * f).sum()
+    rt_f = (residual_detached * f).sum()
+
+    # Jt_u = grad_theta(u^T f).
+    Jt_u = torch.autograd.grad(ut_f, params, retain_graph=True, create_graph=False)
+    # grad_rt_f = grad_theta(r^T f), kept differentiable so we can apply H_r.
+    grad_rt_f = torch.autograd.grad(rt_f, params, create_graph=True)
+    # Hr_Jt_u = grad_theta^2(r^T f) [J^T u].
+    Hr_Jt_u = torch.autograd.grad(grad_rt_f, params, grad_outputs=[part.detach() for part in Jt_u], allow_unused=False)
+
+    ut_J_Ht_Jt_u = _dot_param_lists([part.detach() for part in Jt_u], Hr_Jt_u)
+
+    return float((-(2.0 / float(n)) * ut_J_Ht_Jt_u).detach().item())
+
+
+def _compute_residual_ntk_alignment(K: torch.Tensor, residual: torch.Tensor, denom: torch.Tensor) -> Optional[torch.Tensor]:
+    """Return A = r^T K r / ||r||^2, or None for zero residual."""
+    if float(denom.detach().item()) <= 0.0:
+        return None
+    return (residual @ (K @ residual)) / denom
+
+
+def _compute_residual_dynamics_term(K: torch.Tensor, residual: torch.Tensor, denom: torch.Tensor) -> Optional[torch.Tensor]:
+    """
+    Return D_res = -(2/n) ||(I - uu^T) K u||^2 for u = r / ||r||.
+    """
+    if float(denom.detach().item()) <= 0.0:
+        return None
+    u = residual / torch.sqrt(denom)
+    Ku = K @ u
+    projected_Ku = Ku - u * (u @ Ku)
+    return -(2.0 / float(residual.shape[0])) * projected_Ku.pow(2).sum()
+
+
+def _needs_ntk_matrix(metric_set: set, label_energy_ks: Sequence[int]) -> bool:
+    return bool(label_energy_ks) or any(ntk_metric_needs_matrix(name) for name in metric_set)
+
+
+def _compute_ntk_metrics(
+    model,
+    X: torch.Tensor,
+    y: torch.Tensor,
+    batch_size: int,
+    metric_names: Sequence[str],
+) -> Dict[str, float]:
+    """Compute requested raw-NTK spectral/alignment metrics for the scalar binary probe."""
+    metric_names = list(metric_names)
+    metric_set = set(metric_names)
+    label_energy_ks = sorted(
+        {
+            k for k in (parse_ntk_label_energy_metric(name) for name in metric_names)
+            if k is not None
+        }
+    )
+    needs_matrix = _needs_ntk_matrix(metric_set, label_energy_ks)
+    needs_eigenvectors = bool(label_energy_ks)
+
+    metrics: Dict[str, float] = {}
+    h, _, activation_derivative, residual = _binary_hidden_forward(model, X, y)
+    if residual is None:
+        raise RuntimeError("Internal error: NTK metrics require residuals.")
+    denom = residual.pow(2).sum()
+
+    if needs_matrix:
+        K = _compute_ntk_matrix(
+            model,
+            X,
+            h,
+            activation_derivative,
+            batch_size=batch_size,
+        )
+        if needs_eigenvectors:
+            eigenvalues, eigenvectors = torch.linalg.eigh(K)
+        else:
+            # print("K finite", torch.isfinite(K).all().item())
+            # print("K symmetry err", (K - K.T).abs().max().item())
+            # print("K max abs", K.abs().max().item())
+            # print("K diag min/max", K.diag().min().item(), K.diag().max().item())
+            # print("K dtype/device", K.dtype, K.device)
+            eigenvalues = torch.linalg.eigvalsh(K)
+            eigenvectors = None
+
+        eig = {
+            "ntk_eig_min": eigenvalues[0],
+            "ntk_eig_max": eigenvalues[-1],
+            "ntk_eig_mean": eigenvalues.mean(),
+            "ntk_eig_median": _sorted_median(eigenvalues),
+        }
+        for name, value in eig.items():
+            if name in metric_set:
+                metrics[name] = float(value.item())
+
+        alignment = _compute_residual_ntk_alignment(K, residual, denom)
+
+        if "residual_ntk_alignment" in metric_set:
+            metrics["residual_ntk_alignment"] = _metric_or_nan(alignment)
+
+        for ratio_name, eig_name in (
+            ("residual_ntk_alignment_over_ntk_eig_min", "ntk_eig_min"),
+            ("residual_ntk_alignment_over_ntk_eig_mean", "ntk_eig_mean"),
+            ("residual_ntk_alignment_over_ntk_eig_max", "ntk_eig_max"),
+        ):
+            if ratio_name in metric_set:
+                metrics[ratio_name] = float("nan") if alignment is None else _safe_ratio(alignment, eig[eig_name])
+
+        empirical_loss = residual.pow(2).mean()
+        if "empirical_loss_times_residual_ntk_alignment" in metric_set:
+            metrics["empirical_loss_times_residual_ntk_alignment"] = (
+                float("nan") if alignment is None else float((empirical_loss * alignment).item())
+            )
+        if "empirical_loss_times_ntk_eig_min" in metric_set:
+            metrics["empirical_loss_times_ntk_eig_min"] = float((empirical_loss * eig["ntk_eig_min"]).item())
+
+        if "residual_ntk_alignment_residual_dynamics_term" in metric_set:
+            metrics["residual_ntk_alignment_residual_dynamics_term"] = _metric_or_nan(
+                _compute_residual_dynamics_term(K, residual, denom)
+            )
+
+        if needs_eigenvectors:
+            # Label energy is sum_i<=k (u_i^T y)^2 / ||y||^2, where
+            # u_i are NTK eigenvectors ordered by decreasing eigenvalue.
+            y_vec = y.view(-1)
+            y_denom = y_vec.pow(2).sum()
+            top_eigenvectors = torch.flip(eigenvectors, dims=(1,))
+            for k in label_energy_ks:
+                name = append_k_to_ntk_label_energy_metric(k)
+                k_eff = min(int(k), top_eigenvectors.shape[1])
+                if float(y_denom.item()) <= 0.0:
+                    metrics[name] = float("nan")
+                else:
+                    projection = top_eigenvectors[:, :k_eff].T @ y_vec
+                    metrics[name] = float((projection.pow(2).sum() / y_denom).item())
+
+    if "residual_ntk_alignment_ntk_dynamics_term" in metric_set:
+        metrics["residual_ntk_alignment_ntk_dynamics_term"] = _compute_ntk_alignment_ntk_dynamics_term(model, X, residual)
+
+    return metrics
+
+
 def get_binary_probe_stats(
     model,
     X: torch.Tensor,
@@ -239,6 +562,7 @@ def get_binary_probe_stats(
     forward_metrics = [name for name in metric_names if name in BINARY_FORWARD_METRICS]
     gradient_metrics = [name for name in metric_names if name in BINARY_GRADIENT_METRICS]
     parameter_metrics = [name for name in metric_names if name in BINARY_PARAMETER_METRICS]
+    ntk_metrics = [name for name in metric_names if is_ntk_metric(name)]
 
     metrics: Dict[str, float] = {}
     if parameter_metrics:
@@ -253,6 +577,16 @@ def get_binary_probe_stats(
                 y,
                 batch_size=jacobian_batch_size,
                 metric_names=gradient_metrics,
+            )
+        )
+    if ntk_metrics:
+        metrics.update(
+            _compute_ntk_metrics(
+                model,
+                X,
+                y,
+                batch_size=jacobian_batch_size,
+                metric_names=ntk_metrics,
             )
         )
     return metrics

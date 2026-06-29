@@ -22,6 +22,7 @@ from .core import (
     summarize_rows,
     write_csv,
 )
+from .metrics import ntk_metric_needs_hvp, ntk_metric_needs_matrix
 from .plotting import plot_probe_summaries
 
 MB = 1024 * 1024
@@ -68,10 +69,12 @@ def run_probe_parallel(config: InitScaleProbeConfig):
     if not items:
         rows = []
     elif device == "cpu":
+        items = _sort_work_items_by_estimated_cost(config, items)
         slots = _cpu_slots(config, items)
         rows = _run_items(config, items, slots)
     else:
         items = _profile_items(config, items, device)
+        items = _sort_work_items_by_estimated_cost(config, items)
         slots = _cuda_slots(config, items, device)
         _print_slots("CUDA worker slots", slots)
         rows = _run_items(config, items, slots)
@@ -138,6 +141,11 @@ def _build_work_items(config: InitScaleProbeConfig) -> List[WorkItem]:
                                     )
                                 )
     return items
+
+
+def _sort_work_items_by_estimated_cost(config: InitScaleProbeConfig, items: Sequence[WorkItem]) -> List[WorkItem]:
+    """Run larger estimated-memory jobs first to reduce the slow-job tail."""
+    return sorted(items, key=lambda item: _static_memory_estimate_mb(config, item), reverse=True)
 
 # -------------------------------------------------------------------------- #
 # ----------------------------- device slots ------------------------------- #
@@ -309,9 +317,36 @@ def _static_memory_estimate_mb(config: InitScaleProbeConfig, item: WorkItem) -> 
     data_bytes = item.n * d * dtype_bytes
     model_bytes = item.m * (d + 1) * dtype_bytes
     act_bytes = batch * item.m * dtype_bytes
+    spectral_ntk_bytes = 0
+    spectral_hidden_bytes = 0
+    hvp_graph_bytes = 0
+    hvp_param_bytes = 0
+    tracked_metrics = tuple(config.tracked_metrics or [])
+    if any(_is_ntk_matrix_metric_name(name) for name in tracked_metrics):
+        spectral_hidden_bytes = 2 * item.n * item.m * dtype_bytes
+        spectral_ntk_bytes = item.n * item.n * dtype_bytes
+    if any(_is_ntk_hvp_metric_name(name) for name in tracked_metrics):
+        hvp_graph_bytes = item.n * item.m * dtype_bytes
+        hvp_param_bytes = model_bytes
 
     # Conservative counts for live tensors with model-size and activation-size order.
-    return (data_bytes + 3 * model_bytes + 8 * act_bytes) / MB + 512.0
+    return (
+        data_bytes
+        + 3 * model_bytes
+        + 8 * act_bytes
+        + 3 * spectral_hidden_bytes
+        + 3 * spectral_ntk_bytes
+        + 10 * hvp_param_bytes
+        + 8 * hvp_graph_bytes
+    ) / MB + 512.0
+
+
+def _is_ntk_matrix_metric_name(name: str) -> bool:
+    return ntk_metric_needs_matrix(name)
+
+
+def _is_ntk_hvp_metric_name(name: str) -> bool:
+    return ntk_metric_needs_hvp(name)
 
 # -------------------------------------------------------------------------- #
 # -------------------------- scheduling & tracking ------------------------- #
