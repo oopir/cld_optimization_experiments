@@ -13,6 +13,7 @@ from ..base.training import run_full_batch_training_checkpoints, seed_training_r
 from ..base.data import load_binary_classification_data
 from .metrics import (
     append_k_to_ntk_label_energy_metric,
+    append_k_to_ntk_residual_energy_metric,
     BINARY_ALL_METRICS,
     BINARY_CORE_METRICS,
     BINARY_DEFAULT_METRICS,
@@ -23,7 +24,7 @@ from .metrics import (
     ntk_loss_weighted_average_base_metric,
     ntk_loss_weighted_average_dependencies,
     PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES,
-    parse_ntk_label_energy_metric,
+    parse_ntk_energy_metric,
     get_binary_probe_stats,
 )
 
@@ -50,8 +51,12 @@ def _parse_beta_value(value: Any) -> float:
 def _valid_tracked_metric_names(ntk_label_energy_k_values: Sequence[int]) -> set:
     """Return per-run metrics plus configured dynamic NTK metric names."""
     return set(ALL_METRICS) | {
-        append_k_to_ntk_label_energy_metric(k)
+        metric_name
         for k in ntk_label_energy_k_values
+        for metric_name in (
+            append_k_to_ntk_label_energy_metric(k),
+            append_k_to_ntk_residual_energy_metric(k),
+        )
     }
 
 
@@ -68,7 +73,7 @@ def _unknown_metric_names(metric_names: Sequence[str], valid_names: set) -> List
 
 
 def _configured_dynamic_metric_error_hint(metric_names: Sequence[str]) -> Optional[str]:
-    if any(parse_ntk_label_energy_metric(name) is not None for name in metric_names):
+    if any(parse_ntk_energy_metric(name) is not None for name in metric_names):
         return ". Add matching k values to ntk_label_energy_k_values."
     return None
 

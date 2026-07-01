@@ -49,7 +49,7 @@ NTK_ALIGNMENT_DYNAMICS_GROUP_METRICS = (
 )
 GROUPED_METRIC_PDFS = (
     ("ntk_spectrum_metrics", NTK_SPECTRUM_GROUP_METRICS),
-    ("ntk_label_energy_metrics", "ntk_label_energy_top_"),
+    ("ntk_energy_metrics", ("ntk_label_energy_top_", "ntk_residual_energy_top_")),
     ("residual_ntk_alignment_metrics", RESIDUAL_NTK_ALIGNMENT_GROUP_METRICS),
     ("loss_weighted_ntk_metrics", LOSS_WEIGHTED_NTK_GROUP_METRICS),
     ("ntk_alignment_dynamics_terms", NTK_ALIGNMENT_DYNAMICS_GROUP_METRICS),
@@ -153,6 +153,8 @@ def _grouped_metric_names(metric_names: Sequence[str]) -> Dict[str, List[str]]:
                 continue
             if isinstance(matcher, str):
                 matches = metric_name.startswith(matcher)
+            elif matcher and isinstance(matcher[0], str) and matcher[0].endswith("_"):
+                matches = any(metric_name.startswith(prefix) for prefix in matcher)
             else:
                 matches = metric_name in matcher
             if matches:
@@ -865,7 +867,7 @@ def _make_nm_heatmaps_figure(
     if finite_values.size == 0:
         return None
 
-    use_log = bool(np.all(finite_values > 0)) and not _is_ntk_label_energy_metric(metric_name)
+    use_log = bool(np.all(finite_values > 0)) and not _is_ntk_energy_metric(metric_name)
     transformed = [
         (n, step, np.log10(matrix) if use_log else matrix, m_values, beta_panel_values)
         for n, step, matrix, m_values, beta_panel_values in panels
@@ -1065,6 +1067,8 @@ def _clear_probe_plot_files(output_dir: Path, metric_names: Sequence[str] = ()) 
         output_dir / "ntk_spectrum_metrics_nm_heatmaps.pdf",
         output_dir / "ntk_eig_metrics.pdf",
         output_dir / "ntk_eig_metrics_nm_heatmaps.pdf",
+        output_dir / "ntk_energy_metrics.pdf",
+        output_dir / "ntk_energy_metrics_nm_heatmaps.pdf",
         output_dir / "ntk_label_energy_metrics.pdf",
         output_dir / "ntk_label_energy_metrics_nm_heatmaps.pdf",
         output_dir / "residual_ntk_alignment_metrics.pdf",
@@ -1101,6 +1105,8 @@ def _clear_probe_plot_files(output_dir: Path, metric_names: Sequence[str] = ()) 
         for path in output_dir.glob(f"{metric_name}_heatmap_*.pdf"):
             path.unlink()
     for path in output_dir.glob("ntk_label_energy_top_*.pdf"):
+        path.unlink()
+    for path in output_dir.glob("ntk_residual_energy_top_*.pdf"):
         path.unlink()
 
 
@@ -1142,13 +1148,24 @@ def _metric_label(name: str) -> str:
     if name in normalized_labels:
         return normalized_labels[name]
     if _is_ntk_label_energy_metric(name):
-        return f"E_t(y, k={name.rsplit('_', 1)[-1]})"
+        return f"label energy top {name.rsplit('_', 1)[-1]}"
+    if _is_ntk_residual_energy_metric(name):
+        return f"residual energy top {name.rsplit('_', 1)[-1]}"
     return name.replace("_", " ")
 
 
 def _is_ntk_label_energy_metric(name: str) -> bool:
     prefix = "ntk_label_energy_top_"
     return name.startswith(prefix) and name[len(prefix):].isdigit()
+
+
+def _is_ntk_residual_energy_metric(name: str) -> bool:
+    prefix = "ntk_residual_energy_top_"
+    return name.startswith(prefix) and name[len(prefix):].isdigit()
+
+
+def _is_ntk_energy_metric(name: str) -> bool:
+    return _is_ntk_label_energy_metric(name) or _is_ntk_residual_energy_metric(name)
 
 
 def _uses_zero_reference_line(metric_name: str) -> bool:

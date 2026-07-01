@@ -83,6 +83,7 @@ PROBE_NTK_HVP_METRICS = (
 )
 
 PROBE_NTK_LABEL_ENERGY_PREFIX = "ntk_label_energy_top_"
+PROBE_NTK_RESIDUAL_ENERGY_PREFIX = "ntk_residual_energy_top_"
 PROBE_NTK_STATIC_METRICS = PROBE_NTK_EIGEN_METRICS + PROBE_NTK_ALIGNMENT_METRICS
 PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES = {
     "loss_weighted_residual_ntk_alignment": ("empirical_loss", "empirical_loss_times_residual_ntk_alignment"),
@@ -103,22 +104,39 @@ def append_k_to_ntk_label_energy_metric(k: int) -> str:
     return f"{PROBE_NTK_LABEL_ENERGY_PREFIX}{int(k)}"
 
 
-def parse_ntk_label_energy_metric(name: str) -> Optional[int]:
-    if not name.startswith(PROBE_NTK_LABEL_ENERGY_PREFIX):
+def append_k_to_ntk_residual_energy_metric(k: int) -> str:
+    return f"{PROBE_NTK_RESIDUAL_ENERGY_PREFIX}{int(k)}"
+
+
+def _parse_positive_int_suffix(name: str, prefix: str) -> Optional[int]:
+    if not name.startswith(prefix):
         return None
-    suffix = name[len(PROBE_NTK_LABEL_ENERGY_PREFIX):]
+    suffix = name[len(prefix):]
     if not suffix.isdigit():
         return None
     k = int(suffix)
     return k if k > 0 else None
 
 
+def parse_ntk_label_energy_metric(name: str) -> Optional[int]:
+    return _parse_positive_int_suffix(name, PROBE_NTK_LABEL_ENERGY_PREFIX)
+
+
+def parse_ntk_residual_energy_metric(name: str) -> Optional[int]:
+    return _parse_positive_int_suffix(name, PROBE_NTK_RESIDUAL_ENERGY_PREFIX)
+
+
+def parse_ntk_energy_metric(name: str) -> Optional[int]:
+    label_k = parse_ntk_label_energy_metric(name)
+    return label_k if label_k is not None else parse_ntk_residual_energy_metric(name)
+
+
 def is_ntk_metric(name: str) -> bool:
-    return name in PROBE_NTK_STATIC_METRICS or parse_ntk_label_energy_metric(name) is not None
+    return name in PROBE_NTK_STATIC_METRICS or parse_ntk_energy_metric(name) is not None
 
 
 def ntk_metric_needs_matrix(name: str) -> bool:
-    return name in PROBE_NTK_MATRIX_METRICS or parse_ntk_label_energy_metric(name) is not None
+    return name in PROBE_NTK_MATRIX_METRICS or parse_ntk_energy_metric(name) is not None
 
 
 def ntk_metric_needs_hvp(name: str) -> bool:
@@ -464,8 +482,15 @@ def _compute_ntk_metrics(
             if k is not None
         }
     )
-    needs_matrix = _needs_ntk_matrix(metric_set, label_energy_ks)
-    needs_eigenvectors = bool(label_energy_ks)
+    residual_energy_ks = sorted(
+        {
+            k for k in (parse_ntk_residual_energy_metric(name) for name in metric_names)
+            if k is not None
+        }
+    )
+    energy_ks = sorted({*label_energy_ks, *residual_energy_ks})
+    needs_matrix = _needs_ntk_matrix(metric_set, energy_ks)
+    needs_eigenvectors = bool(energy_ks)
 
     metrics: Dict[str, float] = {}
     h, _, activation_derivative, residual = _binary_hidden_forward(model, X, y)
@@ -542,6 +567,16 @@ def _compute_ntk_metrics(
                 else:
                     projection = top_eigenvectors[:, :k_eff].T @ y_vec
                     metrics[name] = float((projection.pow(2).sum() / y_denom).item())
+
+            # Residual energy is sum_i<=k (u_i^T r)^2 / ||r||^2 using the current residual r.
+            for k in residual_energy_ks:
+                name = append_k_to_ntk_residual_energy_metric(k)
+                k_eff = min(int(k), top_eigenvectors.shape[1])
+                if float(denom.item()) <= 0.0:
+                    metrics[name] = float("nan")
+                else:
+                    projection = top_eigenvectors[:, :k_eff].T @ residual
+                    metrics[name] = float((projection.pow(2).sum() / denom).item())
 
     if "residual_ntk_alignment_ntk_dynamics_term" in metric_set:
         metrics["residual_ntk_alignment_ntk_dynamics_term"] = _compute_ntk_alignment_ntk_dynamics_term(model, X, residual)
