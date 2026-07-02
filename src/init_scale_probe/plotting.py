@@ -70,6 +70,18 @@ NTK_DRIFT_TASK_COMPARISON_METRICS = (
     "task_initial_ntk_alignment",
     "task_ntk_alignment_over_initial",
 )
+TRAINING_LOG_Y_METRICS = (
+    "empirical_loss",
+    "residual_ntk_alignment",
+    "residual_initial_ntk_alignment",
+    "residual_ntk_alignment_over_ntk_eig_min",
+    "residual_ntk_alignment_over_ntk_eig_mean",
+    "residual_ntk_alignment_over_ntk_eig_max",
+    "residual_ntk_alignment_over_initial",
+    "task_ntk_alignment_over_initial",
+    "loss_weighted_residual_ntk_alignment",
+    "loss_weighted_ntk_eig_min",
+)
 GROUPED_METRIC_PDFS = (
     ("loss", LOSS_GROUP_METRICS),
     ("ntk_spectrum_metrics", NTK_SPECTRUM_GROUP_METRICS),
@@ -223,6 +235,8 @@ def _plot_grouped_training_metric_pdfs(
             curve_figures.append(_make_training_curves_figure(summary_rows, metric_name))
             if config.plot_heatmaps:
                 heatmap_figures.append(_make_nm_heatmaps_figure(summary_rows, metric_name))
+        if file_stem == "loss":
+            curve_figures.append(_make_final_test_error_vs_m_figure(summary_rows))
         path = output_dir / f"{file_stem}.pdf"
         if _save_figures_pdf_equal_width(curve_figures, path):
             paths[f"plot_{file_stem}"] = path
@@ -799,6 +813,10 @@ def _make_training_curves_figure(
     step_values = _unique_values(rows, "training_steps")
     if not step_values:
         return None
+    x_uses_log_scale = _training_step_axis_uses_log_scale(step_values)
+    step_tick_values = _training_step_tick_values(step_values, x_uses_log_scale)
+    x_tick_values = [_training_step_plot_value(value, x_uses_log_scale) for value in step_tick_values]
+    y_uses_log_scale = _training_curve_uses_log_y(metric_name, rows, mean_key)
 
     fig_width = max(3.4 * len(beta_values) + 1.0, 4.6)
     fig_height = max(2.25 * len(n_values) + 1.0, 3.4)
@@ -830,7 +848,10 @@ def _make_training_curves_figure(
                 if not line_rows:
                     continue
                 ax.plot(
-                    np.asarray([float(row["training_steps"]) for row in line_rows], dtype=float),
+                    np.asarray(
+                        [_training_step_plot_value(row["training_steps"], x_uses_log_scale) for row in line_rows],
+                        dtype=float,
+                    ),
                     np.asarray([float(row[mean_key]) for row in line_rows], dtype=float),
                     marker="o",
                     linewidth=1.8,
@@ -843,16 +864,25 @@ def _make_training_curves_figure(
 
             if row_idx == 0:
                 ax.set_title(f"beta={_format_value(beta)}", fontsize=9)
-            ax.set_xticks([float(value) for value in step_values])
-            ax.set_xticklabels([_format_value(value) for value in step_values])
+            if x_uses_log_scale:
+                ax.set_xscale("log")
+                ax.xaxis.set_major_formatter(ScalarFormatter())
+                ax.xaxis.set_minor_locator(NullLocator())
+                ax.xaxis.set_minor_formatter(NullFormatter())
+            if y_uses_log_scale:
+                ax.set_yscale("log")
+            ax.set_xticks(x_tick_values)
+            ax.set_xticklabels([_format_value(value) for value in step_tick_values])
             ax.grid(False)
             if row_idx == len(n_values) - 1:
-                ax.set_xlabel(_axis_label("training_steps"))
+                ax.set_xlabel(_training_step_axis_label(x_uses_log_scale))
             if col_idx == len(beta_values) - 1:
                 ax.yaxis.set_label_position("right")
                 ax.set_ylabel(f"n={_format_value(n)}", rotation=0, labelpad=28, va="center")
             if _uses_zero_reference_line(metric_name):
                 ax.axhline(0.0, color="0.35", linewidth=0.8, linestyle="--", alpha=0.8)
+            if _uses_one_reference_line(metric_name):
+                ax.axhline(1.0, color="0.35", linewidth=0.8, linestyle="--", alpha=0.8)
 
     if seen_m_values:
         m_handles = [
@@ -871,6 +901,64 @@ def _make_training_curves_figure(
     fig.suptitle(f"{_metric_label(metric_name)} vs training steps", fontsize=13)
     fig.supylabel(_metric_label(metric_name), fontsize=10)
     return fig
+
+
+def _training_step_axis_uses_log_scale(step_values: Sequence[Any]) -> bool:
+    """Use log(step + 1) when every plotted checkpoint can be shifted positive."""
+    shifted = np.asarray([float(value) + 1.0 for value in step_values], dtype=float)
+    return bool(shifted.size > 0 and np.all(np.isfinite(shifted)) and np.all(shifted > 0.0))
+
+
+def _training_step_plot_value(value: Any, use_log_scale: bool) -> float:
+    """Return the x-coordinate for a training checkpoint without mutating row data."""
+    value = float(value)
+    return value + 1.0 if use_log_scale else value
+
+
+def _training_step_tick_values(
+    step_values: Sequence[Any],
+    use_log_scale: bool,
+    max_ticks: int = 5,
+) -> List[Any]:
+    """Return a sparse set of real checkpoint steps to label on the x-axis."""
+    steps = list(sorted(step_values, key=_sort_key))
+    if not use_log_scale or len(steps) <= max_ticks:
+        return steps
+
+    x = np.asarray([_training_step_plot_value(step, use_log_scale=True) for step in steps], dtype=float)
+    targets = np.linspace(float(np.log(x[0])), float(np.log(x[-1])), max_ticks)
+
+    tick_indices: List[int] = []
+    log_x = np.log(x)
+    for target in targets:
+        idx = int(np.argmin(np.abs(log_x - target)))
+        if idx not in tick_indices:
+            tick_indices.append(idx)
+
+    return [steps[idx] for idx in tick_indices]
+
+
+def _training_step_axis_label(use_log_scale: bool) -> str:
+    label = _axis_label("training_steps")
+    if use_log_scale:
+        label += ", log(step + 1)"
+    return label
+
+
+def _training_curve_uses_log_y(
+    metric_name: str,
+    rows: Sequence[Mapping[str, Any]],
+    mean_key: str,
+) -> bool:
+    if not _prefers_training_log_y(metric_name):
+        return False
+    values = np.asarray([float(row[mean_key]) for row in rows if np.isfinite(float(row[mean_key]))], dtype=float)
+    return bool(values.size > 0 and np.all(values > 0.0))
+
+
+def _prefers_training_log_y(metric_name: str) -> bool:
+    # NTK energy metrics are positive, but they are bounded fractions; keep their y-axis linear.
+    return metric_name in TRAINING_LOG_Y_METRICS
 
 
 def _make_nm_heatmaps_figure(
@@ -1008,6 +1096,103 @@ def _make_nm_heatmaps_figure(
         linewidth=0.8,
         linestyle=(0, (3, 3)),
     ))
+    return fig
+
+
+def _make_final_test_error_vs_m_figure(
+    summary_rows: Sequence[Mapping[str, Any]],
+) -> Optional[plt.Figure]:
+    """Build a final-step test-error summary plot appended to the loss PDF."""
+    mean_key = "test_error_mean"
+    std_key = "test_error_std"
+    rows = [row for row in summary_rows if mean_key in row and np.isfinite(float(row[mean_key]))]
+    if not rows:
+        return None
+
+    final_step = max(float(row["training_steps"]) for row in rows)
+    rows = [row for row in rows if float(row["training_steps"]) == final_step]
+    if not rows:
+        return None
+
+    beta_values = _unique_values(rows, "beta")
+    n_values = _unique_values(rows, "n")
+    m_values = _unique_values(rows, "m")
+    if not beta_values or not n_values or not m_values:
+        return None
+
+    fig_width = max(3.4 * len(beta_values) + 1.4, 4.8)
+    fig_height = 3.7
+    fig, axes = plt.subplots(
+        1,
+        len(beta_values),
+        figsize=(fig_width, fig_height),
+        squeeze=False,
+        sharey=True,
+        constrained_layout=True,
+    )
+    colors = plt.cm.viridis(np.linspace(0.1, 0.9, max(len(n_values), 1)))
+    color_by_n = {n_value: colors[idx] for idx, n_value in enumerate(n_values)}
+    seen_n_values = set()
+    use_log_m = all(float(value) > 0.0 for value in m_values)
+
+    for col_idx, beta in enumerate(beta_values):
+        ax = axes[0][col_idx]
+        panel_rows = [row for row in rows if row["beta"] == beta]
+        for n in n_values:
+            line_rows = sorted(
+                [
+                    row for row in panel_rows
+                    if row["n"] == n and np.isfinite(float(row[mean_key]))
+                ],
+                key=lambda row: _sort_key(row["m"]),
+            )
+            if not line_rows:
+                continue
+            x = np.asarray([float(row["m"]) for row in line_rows], dtype=float)
+            y = np.asarray([float(row[mean_key]) for row in line_rows], dtype=float)
+            yerr = np.asarray([float(row.get(std_key, 0.0)) for row in line_rows], dtype=float)
+            ax.errorbar(
+                x,
+                y,
+                yerr=yerr,
+                marker="o",
+                capsize=3,
+                linewidth=1.8,
+                markersize=4.5,
+                color=color_by_n[n],
+                linestyle="-",
+                label=f"n={_format_value(n)}",
+            )
+            seen_n_values.add(n)
+
+        if use_log_m:
+            ax.set_xscale("log")
+            ax.xaxis.set_major_formatter(ScalarFormatter())
+            ax.xaxis.set_minor_locator(NullLocator())
+            ax.xaxis.set_minor_formatter(NullFormatter())
+        ax.set_xticks([float(value) for value in m_values])
+        ax.set_xticklabels([_format_value(value) for value in m_values], rotation=30 if len(m_values) > 6 else 0)
+        ax.set_title(f"beta={_format_value(beta)}", fontsize=9)
+        ax.set_xlabel(_axis_label("m", log_scale=use_log_m))
+        if col_idx == 0:
+            ax.set_ylabel(_metric_label("test_error"))
+        ax.grid(False)
+
+    if seen_n_values:
+        n_handles = [
+            Line2D([0], [0], color=color_by_n[n], marker="o", linestyle="-", linewidth=2.0, markersize=5)
+            for n in n_values
+            if n in seen_n_values
+        ]
+        n_labels = [f"n={_format_value(n)}" for n in n_values if n in seen_n_values]
+        fig.legend(
+            n_handles,
+            n_labels,
+            loc="outside right upper",
+            frameon=False,
+            title="sample size",
+        )
+    fig.suptitle(f"Final test error vs width (final step={_format_value(final_step)})", fontsize=13)
     return fig
 
 
@@ -1221,6 +1406,10 @@ def _is_ntk_energy_metric(name: str) -> bool:
 
 def _uses_zero_reference_line(metric_name: str) -> bool:
     return metric_name in NTK_ALIGNMENT_DYNAMICS_GROUP_METRICS
+
+
+def _uses_one_reference_line(metric_name: str) -> bool:
+    return metric_name.endswith("_over_initial")
 
 
 def _metric_label_parts(name: str) -> Tuple[str, str]:
