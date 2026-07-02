@@ -26,6 +26,10 @@ LEGACY_METRICS = (
 )
 
 INITIALIZATION_FIXED_AXES = ("alpha", "beta", "training_steps", "synthetic_anisotropy_power")
+LOSS_GROUP_METRICS = (
+    "empirical_loss",
+    "test_error",
+)
 NTK_SPECTRUM_GROUP_METRICS = (
     "ntk_eig_min",
     "ntk_eig_mean",
@@ -47,12 +51,33 @@ NTK_ALIGNMENT_DYNAMICS_GROUP_METRICS = (
     "residual_ntk_alignment_residual_dynamics_term",
     "residual_ntk_alignment_ntk_dynamics_term",
 )
+NTK_DRIFT_GROUP_METRICS = (
+    "residual_initial_ntk_alignment",
+    "residual_ntk_alignment_over_initial",
+    "task_ntk_alignment",
+    "task_initial_ntk_alignment",
+    "task_ntk_alignment_over_initial",
+    "ntk_cos_dist",
+    "ntk_rel_fro_dist",
+)
+NTK_DRIFT_RESIDUAL_COMPARISON_METRICS = (
+    "residual_ntk_alignment",
+    "residual_initial_ntk_alignment",
+    "residual_ntk_alignment_over_initial",
+)
+NTK_DRIFT_TASK_COMPARISON_METRICS = (
+    "task_ntk_alignment",
+    "task_initial_ntk_alignment",
+    "task_ntk_alignment_over_initial",
+)
 GROUPED_METRIC_PDFS = (
+    ("loss", LOSS_GROUP_METRICS),
     ("ntk_spectrum_metrics", NTK_SPECTRUM_GROUP_METRICS),
     ("ntk_energy_metrics", ("ntk_label_energy_top_", "ntk_residual_energy_top_")),
     ("residual_ntk_alignment_metrics", RESIDUAL_NTK_ALIGNMENT_GROUP_METRICS),
     ("loss_weighted_ntk_metrics", LOSS_WEIGHTED_NTK_GROUP_METRICS),
     ("ntk_alignment_dynamics_terms", NTK_ALIGNMENT_DYNAMICS_GROUP_METRICS),
+    ("ntk_drift_metrics", NTK_DRIFT_GROUP_METRICS),
 )
 
 
@@ -164,7 +189,21 @@ def _grouped_metric_names(metric_names: Sequence[str]) -> Dict[str, List[str]]:
     for pair in LOSS_WEIGHTED_NTK_GROUP_PAIRS:
         if any(metric_name in requested for metric_name in pair):
             groups["loss_weighted_ntk_metrics"].extend(pair)
+    drift_comparison_metrics = []
+    if requested & set(NTK_DRIFT_RESIDUAL_COMPARISON_METRICS):
+        drift_comparison_metrics.extend(NTK_DRIFT_RESIDUAL_COMPARISON_METRICS)
+    if requested & set(NTK_DRIFT_TASK_COMPARISON_METRICS):
+        drift_comparison_metrics.extend(NTK_DRIFT_TASK_COMPARISON_METRICS)
+    if drift_comparison_metrics:
+        groups["ntk_drift_metrics"] = _unique_metric_names(
+            (*drift_comparison_metrics, *groups["ntk_drift_metrics"])
+        )
     return {file_stem: names for file_stem, names in groups.items() if names}
+
+
+def _unique_metric_names(metric_names: Sequence[str]) -> List[str]:
+    """Return metric names in first-seen order without duplicates."""
+    return list(dict.fromkeys(metric_names))
 
 
 def _plot_grouped_training_metric_pdfs(
@@ -809,7 +848,8 @@ def _make_training_curves_figure(
             ax.grid(False)
             if row_idx == len(n_values) - 1:
                 ax.set_xlabel(_axis_label("training_steps"))
-            if col_idx == 0:
+            if col_idx == len(beta_values) - 1:
+                ax.yaxis.set_label_position("right")
                 ax.set_ylabel(f"n={_format_value(n)}", rotation=0, labelpad=28, va="center")
             if _uses_zero_reference_line(metric_name):
                 ax.axhline(0.0, color="0.35", linewidth=0.8, linestyle="--", alpha=0.8)
@@ -829,7 +869,7 @@ def _make_training_curves_figure(
             title="width",
         )
     fig.suptitle(f"{_metric_label(metric_name)} vs training steps", fontsize=13)
-    fig.text(0.01, 0.5, _metric_label(metric_name), va="center", rotation="vertical", fontsize=10)
+    fig.supylabel(_metric_label(metric_name), fontsize=10)
     return fig
 
 
@@ -889,7 +929,7 @@ def _make_nm_heatmaps_figure(
         squeeze=False,
         constrained_layout=True,
     )
-    n_value_offset_points = -70
+    n_value_offset_points = 44
     image = None
     axes_used = []
     for idx, (n, step, matrix, m_values, beta_panel_values) in enumerate(transformed):
@@ -916,9 +956,10 @@ def _make_nm_heatmaps_figure(
             ax.set_xlabel(_axis_label("m"))
         if col_idx == 0:
             ax.set_ylabel(_axis_label("beta"), labelpad=8)
+        if col_idx == len(step_values) - 1:
             ax.annotate(
                 f"{_format_value(n)}",
-                xy=(0.0, 0.5),
+                xy=(1.0, 0.5),
                 xycoords="axes fraction",
                 xytext=(n_value_offset_points, 0),
                 textcoords="offset points",
@@ -941,9 +982,9 @@ def _make_nm_heatmaps_figure(
     grid_bottom = axes[-1][0].get_position().y0
     points_to_fig_x = 1.0 / (72.0 * fig.get_figwidth())
     points_to_fig_y = 1.0 / (72.0 * fig.get_figheight())
-    n_value_x = grid_left + n_value_offset_points * points_to_fig_x
-    n_title_x = n_value_x - 24 * points_to_fig_x
-    n_beta_divider_x = grid_left - 52 * points_to_fig_x
+    n_value_x = grid_right + n_value_offset_points * points_to_fig_x
+    n_title_x = n_value_x + 24 * points_to_fig_x
+    n_beta_divider_x = grid_right + 26 * points_to_fig_x
     title_y = grid_top + 72 * points_to_fig_y
     step_label_y = grid_top + 48 * points_to_fig_y
     step_divider_y = grid_top + 26 * points_to_fig_y
@@ -1077,6 +1118,8 @@ def _clear_probe_plot_files(output_dir: Path, metric_names: Sequence[str] = ()) 
         output_dir / "loss_weighted_ntk_metrics_nm_heatmaps.pdf",
         output_dir / "ntk_alignment_dynamics_terms.pdf",
         output_dir / "ntk_alignment_dynamics_terms_nm_heatmaps.pdf",
+        output_dir / "ntk_drift_metrics.pdf",
+        output_dir / "ntk_drift_metrics_nm_heatmaps.pdf",
         output_dir / "ntk_loss_product_metrics.pdf",
         output_dir / "ntk_loss_product_metrics_nm_heatmaps.pdf",
         output_dir / "ntk_loss_weighted_metrics.pdf",
@@ -1125,6 +1168,7 @@ def _single_metric_pages(values: Sequence[str]) -> List[Sequence[str]]:
 def _metric_label(name: str) -> str:
     """Human-readable metric label for titles and axes."""
     normalized_labels = {
+        "test_error": "test error",
         "mean_preactivation_norm_normalized": "mean preactivation norm / sqrt(m)",
         "mean_output_grad_norm_fc2_normalized": "mean output grad norm fc2 / sqrt(m)",
         "empirical_loss_grad_norm_fc2_normalized": "empirical loss grad norm fc2 / sqrt(m)",
@@ -1144,6 +1188,13 @@ def _metric_label(name: str) -> str:
         "loss_weighted_ntk_eig_min": "loss-weighted ntk eig min",
         "residual_ntk_alignment_residual_dynamics_term": "residual dynamics term",
         "residual_ntk_alignment_ntk_dynamics_term": "NTK dynamics term",
+        "residual_initial_ntk_alignment": "residual initial NTK alignment",
+        "residual_ntk_alignment_over_initial": "residual NTK alignment / initial",
+        "task_ntk_alignment": "task NTK alignment",
+        "task_initial_ntk_alignment": "task initial NTK alignment",
+        "task_ntk_alignment_over_initial": "task NTK alignment / initial",
+        "ntk_cos_dist": "NTK cosine distance from initialization",
+        "ntk_rel_fro_dist": "NTK relative Frobenius distance from initialization",
     }
     if name in normalized_labels:
         return normalized_labels[name]

@@ -22,6 +22,10 @@ BINARY_FORWARD_METRICS = (
     "empirical_loss",
 )
 
+BINARY_TEST_METRICS = (
+    "test_error",
+)
+
 BINARY_OUTPUT_GRAD_METRICS = (
     "mean_output_grad_norm",
     "mean_output_grad_norm_fc1",
@@ -69,6 +73,23 @@ PROBE_NTK_ALIGNMENT_METRICS = (
     "residual_ntk_alignment_residual_dynamics_term",
     "residual_ntk_alignment_ntk_dynamics_term",
 )
+PROBE_NTK_DRIFT_METRICS = (
+    "residual_initial_ntk_alignment",
+    "residual_ntk_alignment_over_initial",
+    "task_ntk_alignment",
+    "task_initial_ntk_alignment",
+    "task_ntk_alignment_over_initial",
+    "ntk_cos_dist",
+    "ntk_rel_fro_dist",
+)
+PROBE_NTK_INITIAL_MATRIX_METRICS = (
+    "residual_initial_ntk_alignment",
+    "residual_ntk_alignment_over_initial",
+    "task_initial_ntk_alignment",
+    "task_ntk_alignment_over_initial",
+    "ntk_cos_dist",
+    "ntk_rel_fro_dist",
+)
 PROBE_NTK_MATRIX_METRICS = PROBE_NTK_EIGEN_METRICS + (
     "residual_ntk_alignment",
     "residual_ntk_alignment_over_ntk_eig_min",
@@ -77,6 +98,11 @@ PROBE_NTK_MATRIX_METRICS = PROBE_NTK_EIGEN_METRICS + (
     "empirical_loss_times_residual_ntk_alignment",
     "empirical_loss_times_ntk_eig_min",
     "residual_ntk_alignment_residual_dynamics_term",
+    "residual_ntk_alignment_over_initial",
+    "task_ntk_alignment",
+    "task_ntk_alignment_over_initial",
+    "ntk_cos_dist",
+    "ntk_rel_fro_dist",
 )
 PROBE_NTK_HVP_METRICS = (
     "residual_ntk_alignment_ntk_dynamics_term",
@@ -84,7 +110,7 @@ PROBE_NTK_HVP_METRICS = (
 
 PROBE_NTK_LABEL_ENERGY_PREFIX = "ntk_label_energy_top_"
 PROBE_NTK_RESIDUAL_ENERGY_PREFIX = "ntk_residual_energy_top_"
-PROBE_NTK_STATIC_METRICS = PROBE_NTK_EIGEN_METRICS + PROBE_NTK_ALIGNMENT_METRICS
+PROBE_NTK_STATIC_METRICS = PROBE_NTK_EIGEN_METRICS + PROBE_NTK_ALIGNMENT_METRICS + PROBE_NTK_DRIFT_METRICS
 PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES = {
     "loss_weighted_residual_ntk_alignment": ("empirical_loss", "empirical_loss_times_residual_ntk_alignment"),
     "loss_weighted_ntk_eig_min": ("empirical_loss", "empirical_loss_times_ntk_eig_min"),
@@ -96,7 +122,7 @@ PROBE_NTK_LOSS_WEIGHTED_AVERAGE_BASE_METRICS = {
 }
 
 BINARY_DEFAULT_METRICS = BINARY_CORE_METRICS + BINARY_LAYERWISE_METRICS + BINARY_PARAMETER_METRICS
-BINARY_ALL_METRICS = BINARY_DEFAULT_METRICS + PROBE_NTK_STATIC_METRICS
+BINARY_ALL_METRICS = BINARY_DEFAULT_METRICS + BINARY_TEST_METRICS + PROBE_NTK_STATIC_METRICS
 BINARY_GRADIENT_METRICS = BINARY_OUTPUT_GRAD_METRICS + BINARY_EMPIRICAL_LOSS_GRAD_METRICS
 
 
@@ -136,7 +162,11 @@ def is_ntk_metric(name: str) -> bool:
 
 
 def ntk_metric_needs_matrix(name: str) -> bool:
-    return name in PROBE_NTK_MATRIX_METRICS or parse_ntk_energy_metric(name) is not None
+    return name in PROBE_NTK_MATRIX_METRICS or ntk_metric_needs_initial_matrix(name) or parse_ntk_energy_metric(name) is not None
+
+
+def ntk_metric_needs_initial_matrix(name: str) -> bool:
+    return name in PROBE_NTK_INITIAL_MATRIX_METRICS
 
 
 def ntk_metric_needs_hvp(name: str) -> bool:
@@ -236,6 +266,31 @@ def _compute_binary_forward_metrics(
             totals["empirical_loss"] += float(residual.pow(2).sum().item())
 
     return {name: value / n for name, value in totals.items()}
+
+
+@torch.no_grad()
+def _compute_binary_test_metrics(
+    model,
+    X_test: Optional[torch.Tensor],
+    y_test: Optional[torch.Tensor],
+    batch_size: int,
+    metric_names: Sequence[str],
+) -> Dict[str, float]:
+    """Compute sign-threshold binary classification metrics on held-out data."""
+    metric_names = set(metric_names)
+    if "test_error" not in metric_names:
+        return {}
+    if X_test is None or y_test is None or X_test.shape[0] == 0:
+        return {"test_error": float("nan")}
+
+    n = X_test.shape[0]
+    incorrect = 0
+    for start in range(0, n, batch_size):
+        end = min(start + batch_size, n)
+        out = model(X_test[start:end]).view(-1)
+        pred = torch.where(out >= 0, 1.0, -1.0).to(dtype=y_test.dtype, device=y_test.device)
+        incorrect += int((pred != y_test[start:end].view(-1)).sum().item())
+    return {"test_error": incorrect / n}
 
 
 @torch.no_grad()
@@ -462,8 +517,51 @@ def _compute_residual_dynamics_term(K: torch.Tensor, residual: torch.Tensor, den
     return -(2.0 / float(residual.shape[0])) * projected_Ku.pow(2).sum()
 
 
+def _compute_ntk_cosine_distance(K: torch.Tensor, K0: torch.Tensor) -> float:
+    """Return 1 - cosine similarity between flattened current and initial NTKs."""
+    K_flat = K.reshape(-1)
+    K0_flat = K0.reshape(-1)
+    denom = torch.linalg.vector_norm(K_flat) * torch.linalg.vector_norm(K0_flat)
+    if float(denom.detach().item()) <= 0.0:
+        return float("nan")
+    similarity = torch.dot(K_flat, K0_flat) / denom
+    similarity = torch.clamp(similarity, -1.0, 1.0)
+    return float((1.0 - similarity).detach().item())
+
+
+def _compute_ntk_relative_frobenius_distance(K: torch.Tensor, K0: torch.Tensor) -> float:
+    """Return ||K - K0||_F / ||K0||_F."""
+    denom = torch.linalg.matrix_norm(K0, ord="fro")
+    if float(denom.detach().item()) <= 0.0:
+        return float("nan")
+    return float((torch.linalg.matrix_norm(K - K0, ord="fro") / denom).detach().item())
+
+
+def _check_initial_ntk_matrix(initial_ntk_matrix: torch.Tensor, K_shape: Tuple[int, int], device, dtype) -> torch.Tensor:
+    if initial_ntk_matrix.shape != K_shape:
+        raise ValueError(
+            "initial_ntk_matrix must have shape "
+            f"{tuple(K_shape)}, got {tuple(initial_ntk_matrix.shape)}."
+        )
+    return initial_ntk_matrix.to(device=device, dtype=dtype)
+
+
 def _needs_ntk_matrix(metric_set: set, label_energy_ks: Sequence[int]) -> bool:
     return bool(label_energy_ks) or any(ntk_metric_needs_matrix(name) for name in metric_set)
+
+
+def _needs_current_ntk_matrix(metric_set: set, label_energy_ks: Sequence[int]) -> bool:
+    return bool(label_energy_ks) or any(name in PROBE_NTK_MATRIX_METRICS for name in metric_set)
+
+
+def compute_binary_probe_ntk_matrix(
+    model,
+    X: torch.Tensor,
+    batch_size: int = 256,
+) -> torch.Tensor:
+    """Compute the scalar-output binary probe NTK matrix at the model's current state."""
+    h, _, activation_derivative, _ = _binary_hidden_forward(model, X)
+    return _compute_ntk_matrix(model, X, h, activation_derivative, batch_size=batch_size).detach()
 
 
 def _compute_ntk_metrics(
@@ -472,6 +570,7 @@ def _compute_ntk_metrics(
     y: torch.Tensor,
     batch_size: int,
     metric_names: Sequence[str],
+    initial_ntk_matrix: Optional[torch.Tensor] = None,
 ) -> Dict[str, float]:
     """Compute requested raw-NTK spectral/alignment metrics for the scalar binary probe."""
     metric_names = list(metric_names)
@@ -489,14 +588,24 @@ def _compute_ntk_metrics(
         }
     )
     energy_ks = sorted({*label_energy_ks, *residual_energy_ks})
-    needs_matrix = _needs_ntk_matrix(metric_set, energy_ks)
+    needs_matrix = _needs_current_ntk_matrix(metric_set, energy_ks)
     needs_eigenvectors = bool(energy_ks)
+    needs_initial_matrix = any(ntk_metric_needs_initial_matrix(name) for name in metric_set)
 
     metrics: Dict[str, float] = {}
     h, _, activation_derivative, residual = _binary_hidden_forward(model, X, y)
     if residual is None:
         raise RuntimeError("Internal error: NTK metrics require residuals.")
     denom = residual.pow(2).sum()
+    y_vec = y.view(-1)
+    y_denom = y_vec.pow(2).sum()
+    alignment = None
+    task_alignment = None
+    K0 = None
+    if needs_initial_matrix:
+        if initial_ntk_matrix is None:
+            raise ValueError("initial_ntk_matrix is required for initialization-NTK metrics.")
+        K0 = _check_initial_ntk_matrix(initial_ntk_matrix, (X.shape[0], X.shape[0]), X.device, X.dtype)
 
     if needs_matrix:
         K = _compute_ntk_matrix(
@@ -528,9 +637,12 @@ def _compute_ntk_metrics(
                 metrics[name] = float(value.item())
 
         alignment = _compute_residual_ntk_alignment(K, residual, denom)
+        task_alignment = _compute_residual_ntk_alignment(K, y_vec, y_denom)
 
         if "residual_ntk_alignment" in metric_set:
             metrics["residual_ntk_alignment"] = _metric_or_nan(alignment)
+        if "task_ntk_alignment" in metric_set:
+            metrics["task_ntk_alignment"] = _metric_or_nan(task_alignment)
 
         for ratio_name, eig_name in (
             ("residual_ntk_alignment_over_ntk_eig_min", "ntk_eig_min"),
@@ -553,11 +665,15 @@ def _compute_ntk_metrics(
                 _compute_residual_dynamics_term(K, residual, denom)
             )
 
+        if K0 is not None:
+            if "ntk_cos_dist" in metric_set:
+                metrics["ntk_cos_dist"] = _compute_ntk_cosine_distance(K, K0)
+            if "ntk_rel_fro_dist" in metric_set:
+                metrics["ntk_rel_fro_dist"] = _compute_ntk_relative_frobenius_distance(K, K0)
+
         if needs_eigenvectors:
             # Label energy is sum_i<=k (u_i^T y)^2 / ||y||^2, where
             # u_i are NTK eigenvectors ordered by decreasing eigenvalue.
-            y_vec = y.view(-1)
-            y_denom = y_vec.pow(2).sum()
             top_eigenvectors = torch.flip(eigenvectors, dims=(1,))
             for k in label_energy_ks:
                 name = append_k_to_ntk_label_energy_metric(k)
@@ -578,6 +694,25 @@ def _compute_ntk_metrics(
                     projection = top_eigenvectors[:, :k_eff].T @ residual
                     metrics[name] = float((projection.pow(2).sum() / denom).item())
 
+    if K0 is not None:
+        initial_alignment = _compute_residual_ntk_alignment(K0, residual, denom)
+        initial_task_alignment = _compute_residual_ntk_alignment(K0, y_vec, y_denom)
+        if "residual_initial_ntk_alignment" in metric_set:
+            metrics["residual_initial_ntk_alignment"] = _metric_or_nan(initial_alignment)
+        if "residual_ntk_alignment_over_initial" in metric_set:
+            metrics["residual_ntk_alignment_over_initial"] = (
+                float("nan") if alignment is None or initial_alignment is None else _safe_ratio(alignment, initial_alignment)
+            )
+        if "task_initial_ntk_alignment" in metric_set:
+            metrics["task_initial_ntk_alignment"] = _metric_or_nan(initial_task_alignment)
+        if "task_ntk_alignment_over_initial" in metric_set:
+            metrics["task_ntk_alignment_over_initial"] = (
+                float("nan") if task_alignment is None or initial_task_alignment is None else _safe_ratio(
+                    task_alignment,
+                    initial_task_alignment,
+                )
+            )
+
     if "residual_ntk_alignment_ntk_dynamics_term" in metric_set:
         metrics["residual_ntk_alignment_ntk_dynamics_term"] = _compute_ntk_alignment_ntk_dynamics_term(model, X, residual)
 
@@ -591,10 +726,14 @@ def get_binary_probe_stats(
     metric_names: Sequence[str],
     batch_size: int = 1024,
     jacobian_batch_size: int = 256,
+    X_test: Optional[torch.Tensor] = None,
+    y_test: Optional[torch.Tensor] = None,
+    initial_ntk_matrix: Optional[torch.Tensor] = None,
 ) -> Dict[str, float]:
     """Compute the requested binary init-scale probe metrics."""
     metric_names = list(metric_names)
     forward_metrics = [name for name in metric_names if name in BINARY_FORWARD_METRICS]
+    test_metrics = [name for name in metric_names if name in BINARY_TEST_METRICS]
     gradient_metrics = [name for name in metric_names if name in BINARY_GRADIENT_METRICS]
     parameter_metrics = [name for name in metric_names if name in BINARY_PARAMETER_METRICS]
     ntk_metrics = [name for name in metric_names if is_ntk_metric(name)]
@@ -604,6 +743,8 @@ def get_binary_probe_stats(
         metrics.update(_compute_binary_parameter_metrics(model, metric_names=parameter_metrics))
     if forward_metrics:
         metrics.update(_compute_binary_forward_metrics(model, X, y, batch_size=batch_size, metric_names=forward_metrics))
+    if test_metrics:
+        metrics.update(_compute_binary_test_metrics(model, X_test, y_test, batch_size=batch_size, metric_names=test_metrics))
     if gradient_metrics:
         metrics.update(
             _compute_binary_gradient_metrics(
@@ -622,6 +763,7 @@ def get_binary_probe_stats(
                 y,
                 batch_size=jacobian_batch_size,
                 metric_names=ntk_metrics,
+                initial_ntk_matrix=initial_ntk_matrix,
             )
         )
     return metrics

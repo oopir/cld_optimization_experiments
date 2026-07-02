@@ -23,8 +23,10 @@ from .metrics import (
     is_ntk_metric,
     ntk_loss_weighted_average_base_metric,
     ntk_loss_weighted_average_dependencies,
+    ntk_metric_needs_initial_matrix,
     PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES,
     parse_ntk_energy_metric,
+    compute_binary_probe_ntk_matrix,
     get_binary_probe_stats,
 )
 
@@ -105,6 +107,14 @@ def _resolve_tracked_metrics_for_plots(tracked_metrics: Optional[Sequence[str]],
         implied_metrics = []
         if base_metric is not None:
             implied_metrics.append(base_metric)
+        if metric_name == "residual_initial_ntk_alignment":
+            implied_metrics.append("residual_ntk_alignment")
+        if metric_name == "residual_ntk_alignment_over_initial":
+            implied_metrics.extend(("residual_ntk_alignment", "residual_initial_ntk_alignment"))
+        if metric_name == "task_initial_ntk_alignment":
+            implied_metrics.append("task_ntk_alignment")
+        if metric_name == "task_ntk_alignment_over_initial":
+            implied_metrics.extend(("task_ntk_alignment", "task_initial_ntk_alignment"))
         if dependencies is not None:
             implied_metrics.extend(dependencies)
         elif add_plotted_ntk_metrics and is_ntk_metric(metric_name):
@@ -406,10 +416,25 @@ def _rows_for_trained_initialization(
 
     X = binary_data["X_train"]
     y = binary_data["y_train_binary"]
+    X_test = binary_data.get("X_test")
+    y_test = binary_data.get("y_test_binary")
     tracked_metrics = config.tracked_metrics or []
+    requested_steps = set(int(step) for step in config.training_step_values)
+    needs_initial_ntk = any(ntk_metric_needs_initial_matrix(name) for name in tracked_metrics)
+    measurement_steps = sorted(requested_steps | ({0} if needs_initial_ntk else set()))
+    initial_ntk_matrix: Optional[torch.Tensor] = None
     rows: List[Dict[str, Any]] = []
 
     def measure(training_step, base):
+        nonlocal initial_ntk_matrix
+        if needs_initial_ntk and initial_ntk_matrix is None:
+            initial_ntk_matrix = compute_binary_probe_ntk_matrix(
+                base.model,
+                X,
+                batch_size=config.jacobian_batch_size,
+            )
+        if int(training_step) not in requested_steps:
+            return
         metrics = get_binary_probe_stats(
             base.model,
             X,
@@ -417,6 +442,9 @@ def _rows_for_trained_initialization(
             tracked_metrics,
             batch_size=config.batch_size,
             jacobian_batch_size=config.jacobian_batch_size,
+            X_test=X_test,
+            y_test=y_test,
+            initial_ntk_matrix=initial_ntk_matrix,
         )
         rows.append(
             _row_from_metrics(
@@ -445,7 +473,7 @@ def _rows_for_trained_initialization(
         targets=y,
         beta=beta,
         eta=config.eta,
-        checkpoint_steps=config.training_step_values,
+        checkpoint_steps=measurement_steps,
         measure_fn=measure,
         batch_size=config.batch_size,
         lam_fc1=None,

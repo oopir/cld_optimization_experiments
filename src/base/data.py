@@ -203,13 +203,18 @@ def load_synthetic_binary_data(
 
     X_train = torch.tensor(X[:n], device=device)
     y_train = torch.tensor(y[:n], device=device, dtype=X_train.dtype).view(-1, 1)
+    X_test = torch.tensor(X[n:], device=device)
+    y_test = torch.tensor(y[n:], device=device, dtype=X_train.dtype).view(-1, 1)
 
     return {
         "d_in": d_in,
         "d_out": 1,
         "X_train": X_train,
+        "X_test": X_test,
         "y_train_binary": y_train,
+        "y_test_binary": y_test,
         "n_effective": int(X_train.shape[0]),
+        "test_size_effective": int(X_test.shape[0]),
     }
 
 
@@ -280,10 +285,25 @@ def load_binary_classification_data(
     y_binary = torch.where(pos_mask[keep], 1.0, -1.0) # from the indices under 'keep', positives map to 1, others to -1
     y_binary = y_binary.to(device=X_train.device, dtype=X_train.dtype)
 
+    y_test = data["y_test"]
+    neg_test_mask = torch.zeros_like(y_test, dtype=torch.bool)
+    pos_test_mask = torch.zeros_like(y_test, dtype=torch.bool)
+    for cls in negative_classes:
+        neg_test_mask |= y_test == int(cls)
+    for cls in positive_classes:
+        pos_test_mask |= y_test == int(cls)
+    keep_test = neg_test_mask | pos_test_mask
+    X_test = data["X_test"][keep_test]
+    y_test_binary = torch.where(pos_test_mask[keep_test], 1.0, -1.0)
+    y_test_binary = y_test_binary.to(device=X_test.device, dtype=X_test.dtype)
+
     return {
         "d_in": data["d_in"],
         "d_out": 1,
         "X_train": X_train,
+        "X_test": X_test,
         "y_train_binary": y_binary.view(-1, 1),
+        "y_test_binary": y_test_binary.view(-1, 1),
         "n_effective": int(X_train.shape[0]),
+        "test_size_effective": int(X_test.shape[0]),
     }
