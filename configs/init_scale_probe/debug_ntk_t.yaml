@@ -1,6 +1,6 @@
 probe:
   dataset: mnist
-  random_labels: true
+  random_labels: false
 
   # n_values: [2048, 4096, 8192]
   n_values: [2048]
@@ -8,20 +8,18 @@ probe:
   # m_values: [16384]
   beta_values: [5000, 20000, inf]
   # beta_values: [250]
-  training_step_values: [0, 200, 500, 1000, 2500, 5000, 10000]
+  training_step_values: [0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 750, 1000]
   # training_step_values: [0, 200, 500]
   eta: 0.0005
   init_type: standard
 
   num_data_seeds: 4
-  # num_data_seeds: 1
   data_seed_start: 0
   num_inits: 16
-  # num_inits: 5
   init_seed_start: 0
 
   device: cuda
-  gpu_ids: [0,1]
+  # gpu_ids: [0, 2, 3, 4, 5, 6, 7]
   batch_size: 4096
   jacobian_batch_size: 1024
   parallel: true
@@ -33,7 +31,8 @@ probe:
   progress_interval_seconds: 120
   progress_detail: summary
 
-  # ntk_label_energy_k_values: [5, 25, 50, 100]
+  ntk_label_energy_k_values: [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
+
   tracked_metrics:
     - empirical_loss
     - ntk_eig_min
@@ -46,6 +45,27 @@ probe:
     - residual_ntk_alignment_over_ntk_eig_max
     - loss_weighted_residual_ntk_alignment
     - loss_weighted_ntk_eig_min
+    - ntk_label_energy_top_1
+    - ntk_label_energy_top_2
+    - ntk_label_energy_top_5
+    - ntk_label_energy_top_10
+    - ntk_label_energy_top_20
+    - ntk_label_energy_top_50
+    - ntk_label_energy_top_100
+    - ntk_label_energy_top_200
+    - ntk_label_energy_top_500
+    - ntk_label_energy_top_1000
+    - ntk_residual_energy_top_1
+    - ntk_residual_energy_top_2
+    - ntk_residual_energy_top_5
+    - ntk_residual_energy_top_10
+    - ntk_residual_energy_top_20
+    - ntk_residual_energy_top_50
+    - ntk_residual_energy_top_100
+    - ntk_residual_energy_top_200
+    - ntk_residual_energy_top_500
+    - ntk_residual_energy_top_1000
+
   plot_metrics:
     - empirical_loss
     - ntk_eig_min
@@ -55,10 +75,25 @@ probe:
     - residual_ntk_alignment
     - residual_ntk_alignment_over_ntk_eig_min
     - residual_ntk_alignment_over_ntk_eig_mean
-    - residual_ntk_alignment_over_ntk_eig_max
-    - loss_weighted_residual_ntk_alignment
-    - loss_weighted_ntk_eig_min
+    - ntk_label_energy_top_1
+    - ntk_label_energy_top_5
+    - ntk_label_energy_top_10
+    - ntk_label_energy_top_50
+    - ntk_label_energy_top_100
+    - ntk_label_energy_top_500
+    - ntk_label_energy_top_1000
+    - ntk_residual_energy_top_1
+    - ntk_residual_energy_top_2
+    - ntk_residual_energy_top_5
+    - ntk_residual_energy_top_10
+    - ntk_residual_energy_top_20
+    - ntk_residual_energy_top_50
+    - ntk_residual_energy_top_100
+    - ntk_residual_energy_top_200
+    - ntk_residual_energy_top_500
+    - ntk_residual_energy_top_1000
+
   plot_format: combined
   plot_heatmaps: false
 
-  output_dir: plots/init_scale_probe/debug_ntk_t
+  output_dir: plots/init_scale_probe/ntk_energy_mnist_time_true_y
