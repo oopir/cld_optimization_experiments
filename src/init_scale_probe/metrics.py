@@ -76,17 +76,21 @@ PROBE_NTK_ALIGNMENT_METRICS = (
 PROBE_NTK_DRIFT_METRICS = (
     "residual_initial_ntk_alignment",
     "residual_ntk_alignment_over_initial",
+    "residual_ntk_alignment_trace_normalized_over_initial",
     "task_ntk_alignment",
     "task_initial_ntk_alignment",
     "task_ntk_alignment_over_initial",
+    "task_ntk_alignment_trace_normalized_over_initial",
     "ntk_cos_dist",
     "ntk_rel_fro_dist",
 )
 PROBE_NTK_INITIAL_MATRIX_METRICS = (
     "residual_initial_ntk_alignment",
     "residual_ntk_alignment_over_initial",
+    "residual_ntk_alignment_trace_normalized_over_initial",
     "task_initial_ntk_alignment",
     "task_ntk_alignment_over_initial",
+    "task_ntk_alignment_trace_normalized_over_initial",
     "ntk_cos_dist",
     "ntk_rel_fro_dist",
 )
@@ -99,8 +103,10 @@ PROBE_NTK_MATRIX_METRICS = PROBE_NTK_EIGEN_METRICS + (
     "empirical_loss_times_ntk_eig_min",
     "residual_ntk_alignment_residual_dynamics_term",
     "residual_ntk_alignment_over_initial",
+    "residual_ntk_alignment_trace_normalized_over_initial",
     "task_ntk_alignment",
     "task_ntk_alignment_over_initial",
+    "task_ntk_alignment_trace_normalized_over_initial",
     "ntk_cos_dist",
     "ntk_rel_fro_dist",
 )
@@ -537,6 +543,19 @@ def _compute_ntk_relative_frobenius_distance(K: torch.Tensor, K0: torch.Tensor) 
     return float((torch.linalg.matrix_norm(K - K0, ord="fro") / denom).detach().item())
 
 
+def _trace_normalized_alignment_ratio(
+    current_alignment: Optional[torch.Tensor],
+    current_trace: Optional[torch.Tensor],
+    initial_alignment: Optional[torch.Tensor],
+    initial_trace: torch.Tensor,
+) -> float:
+    if current_alignment is None or current_trace is None or initial_alignment is None:
+        return float("nan")
+    if float(current_trace.detach().item()) <= 0.0 or float(initial_trace.detach().item()) <= 0.0:
+        return float("nan")
+    return _safe_ratio(current_alignment / current_trace, initial_alignment / initial_trace)
+
+
 def _check_initial_ntk_matrix(initial_ntk_matrix: torch.Tensor, K_shape: Tuple[int, int], device, dtype) -> torch.Tensor:
     if initial_ntk_matrix.shape != K_shape:
         raise ValueError(
@@ -601,6 +620,7 @@ def _compute_ntk_metrics(
     y_denom = y_vec.pow(2).sum()
     alignment = None
     task_alignment = None
+    current_trace = None
     K0 = None
     if needs_initial_matrix:
         if initial_ntk_matrix is None:
@@ -615,6 +635,7 @@ def _compute_ntk_metrics(
             activation_derivative,
             batch_size=batch_size,
         )
+        current_trace = torch.trace(K)
         if needs_eigenvectors:
             eigenvalues, eigenvectors = torch.linalg.eigh(K)
         else:
@@ -695,6 +716,7 @@ def _compute_ntk_metrics(
                     metrics[name] = float((projection.pow(2).sum() / denom).item())
 
     if K0 is not None:
+        initial_trace = torch.trace(K0)
         initial_alignment = _compute_residual_ntk_alignment(K0, residual, denom)
         initial_task_alignment = _compute_residual_ntk_alignment(K0, y_vec, y_denom)
         if "residual_initial_ntk_alignment" in metric_set:
@@ -702,6 +724,13 @@ def _compute_ntk_metrics(
         if "residual_ntk_alignment_over_initial" in metric_set:
             metrics["residual_ntk_alignment_over_initial"] = (
                 float("nan") if alignment is None or initial_alignment is None else _safe_ratio(alignment, initial_alignment)
+            )
+        if "residual_ntk_alignment_trace_normalized_over_initial" in metric_set:
+            metrics["residual_ntk_alignment_trace_normalized_over_initial"] = _trace_normalized_alignment_ratio(
+                alignment,
+                current_trace,
+                initial_alignment,
+                initial_trace,
             )
         if "task_initial_ntk_alignment" in metric_set:
             metrics["task_initial_ntk_alignment"] = _metric_or_nan(initial_task_alignment)
@@ -711,6 +740,13 @@ def _compute_ntk_metrics(
                     task_alignment,
                     initial_task_alignment,
                 )
+            )
+        if "task_ntk_alignment_trace_normalized_over_initial" in metric_set:
+            metrics["task_ntk_alignment_trace_normalized_over_initial"] = _trace_normalized_alignment_ratio(
+                task_alignment,
+                current_trace,
+                initial_task_alignment,
+                initial_trace,
             )
 
     if "residual_ntk_alignment_ntk_dynamics_term" in metric_set:

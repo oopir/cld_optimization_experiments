@@ -54,9 +54,11 @@ NTK_ALIGNMENT_DYNAMICS_GROUP_METRICS = (
 NTK_DRIFT_GROUP_METRICS = (
     "residual_initial_ntk_alignment",
     "residual_ntk_alignment_over_initial",
+    "residual_ntk_alignment_trace_normalized_over_initial",
     "task_ntk_alignment",
     "task_initial_ntk_alignment",
     "task_ntk_alignment_over_initial",
+    "task_ntk_alignment_trace_normalized_over_initial",
     "ntk_cos_dist",
     "ntk_rel_fro_dist",
 )
@@ -64,11 +66,13 @@ NTK_DRIFT_RESIDUAL_COMPARISON_METRICS = (
     "residual_ntk_alignment",
     "residual_initial_ntk_alignment",
     "residual_ntk_alignment_over_initial",
+    "residual_ntk_alignment_trace_normalized_over_initial",
 )
 NTK_DRIFT_TASK_COMPARISON_METRICS = (
     "task_ntk_alignment",
     "task_initial_ntk_alignment",
     "task_ntk_alignment_over_initial",
+    "task_ntk_alignment_trace_normalized_over_initial",
 )
 TRAINING_LOG_Y_METRICS = (
     "empirical_loss",
@@ -1375,9 +1379,11 @@ def _metric_label(name: str) -> str:
         "residual_ntk_alignment_ntk_dynamics_term": "NTK dynamics term",
         "residual_initial_ntk_alignment": "residual initial NTK alignment",
         "residual_ntk_alignment_over_initial": "residual NTK alignment / initial",
+        "residual_ntk_alignment_trace_normalized_over_initial": "trace-normalized residual NTK alignment / initial",
         "task_ntk_alignment": "task NTK alignment",
         "task_initial_ntk_alignment": "task initial NTK alignment",
         "task_ntk_alignment_over_initial": "task NTK alignment / initial",
+        "task_ntk_alignment_trace_normalized_over_initial": "trace-normalized task NTK alignment / initial",
         "ntk_cos_dist": "NTK cosine distance from initialization",
         "ntk_rel_fro_dist": "NTK relative Frobenius distance from initialization",
     }

@@ -111,9 +111,13 @@ def _resolve_tracked_metrics_for_plots(tracked_metrics: Optional[Sequence[str]],
             implied_metrics.append("residual_ntk_alignment")
         if metric_name == "residual_ntk_alignment_over_initial":
             implied_metrics.extend(("residual_ntk_alignment", "residual_initial_ntk_alignment"))
+        if metric_name == "residual_ntk_alignment_trace_normalized_over_initial":
+            implied_metrics.extend(("residual_ntk_alignment", "residual_initial_ntk_alignment"))
         if metric_name == "task_initial_ntk_alignment":
             implied_metrics.append("task_ntk_alignment")
         if metric_name == "task_ntk_alignment_over_initial":
+            implied_metrics.extend(("task_ntk_alignment", "task_initial_ntk_alignment"))
+        if metric_name == "task_ntk_alignment_trace_normalized_over_initial":
             implied_metrics.extend(("task_ntk_alignment", "task_initial_ntk_alignment"))
         if dependencies is not None:
             implied_metrics.extend(dependencies)
