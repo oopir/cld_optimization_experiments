@@ -300,8 +300,8 @@ def _print_slots(label: str, slots: Sequence[DeviceSlot]) -> None:
 def _static_memory_estimate_mb(config: InitScaleProbeConfig, item: WorkItem) -> float:
     """
     Conservatively approximate one worker process's peak tensor memory.
-    This estimates the live tensors for one work item on one device: the binary
-    training data, the scalar-output two-layer model, the empirical-gradient
+    This estimates the live tensors for one work item on one device: the
+    classification data, the scalar-output two-layer model, the empirical-gradient
     accumulator, and the largest batch's temporary activation tensors.
     It does not estimate Python object overhead in detail or PyTorch/CUDA
     context and allocator overhead; the fixed 512 MiB term is a coarse buffer
@@ -702,7 +702,7 @@ def _run_one_item(config: InitScaleProbeConfig, item: WorkItem, device: str) -> 
                 parallel=False,
             )
 
-        binary_data = load_binary_classification_data(
+        data = load_binary_classification_data(
             dataset=worker_config.dataset,
             n=item.n,
             negative_classes=worker_config.negative_classes,
@@ -722,7 +722,7 @@ def _run_one_item(config: InitScaleProbeConfig, item: WorkItem, device: str) -> 
             rows.extend(
                 _rows_for_trained_initialization(
                     worker_config,
-                    binary_data,
+                    data,
                     n=item.n,
                     m=item.m,
                     alpha=item.alpha,

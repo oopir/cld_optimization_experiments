@@ -14,32 +14,32 @@ from ..base.data import load_binary_classification_data
 from .metrics import (
     append_k_to_ntk_label_energy_metric,
     append_k_to_ntk_residual_energy_metric,
-    BINARY_ALL_METRICS,
-    BINARY_CORE_METRICS,
-    BINARY_DEFAULT_METRICS,
-    BINARY_GRADIENT_METRICS,
-    BINARY_LAYERWISE_METRICS,
-    BINARY_PARAMETER_METRICS,
+    ALL_METRICS as METRIC_ALL_METRICS,
+    CORE_METRICS as METRIC_CORE_METRICS,
+    DEFAULT_METRICS as METRIC_DEFAULT_METRICS,
+    GRADIENT_METRICS as METRIC_GRADIENT_METRICS,
+    LAYERWISE_METRICS as METRIC_LAYERWISE_METRICS,
+    PARAMETER_METRICS as METRIC_PARAMETER_METRICS,
     is_ntk_metric,
     ntk_loss_weighted_average_base_metric,
     ntk_loss_weighted_average_dependencies,
     ntk_metric_needs_initial_matrix,
-    PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES,
+    NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES,
     parse_ntk_energy_metric,
-    compute_binary_probe_ntk_matrix,
-    get_binary_probe_stats,
+    compute_ntk_matrix,
+    get_metrics,
 )
 
 # -------------------------------------------------------------------------- #
 # ------------------------------- constants -------------------------------- #
 # -------------------------------------------------------------------------- #
 
-CORE_METRICS = BINARY_CORE_METRICS
-LAYERWISE_METRICS = BINARY_LAYERWISE_METRICS
-PARAMETER_METRICS = BINARY_PARAMETER_METRICS
-ALL_METRICS = BINARY_ALL_METRICS
-DEFAULT_METRICS = BINARY_DEFAULT_METRICS
-GRADIENT_METRICS = BINARY_GRADIENT_METRICS
+CORE_METRICS = METRIC_CORE_METRICS
+LAYERWISE_METRICS = METRIC_LAYERWISE_METRICS
+PARAMETER_METRICS = METRIC_PARAMETER_METRICS
+ALL_METRICS = METRIC_ALL_METRICS
+DEFAULT_METRICS = METRIC_DEFAULT_METRICS
+GRADIENT_METRICS = METRIC_GRADIENT_METRICS
 SWEEP_AXES = ("n", "m", "alpha", "beta", "training_steps", "synthetic_anisotropy_power")
 
 
@@ -65,7 +65,7 @@ def _valid_tracked_metric_names(ntk_label_energy_k_values: Sequence[int]) -> set
 def _valid_plot_metric_names(ntk_label_energy_k_values: Sequence[int]) -> set:
     """Return per-run plot metrics plus configured loss-weighted average names."""
     return _valid_tracked_metric_names(ntk_label_energy_k_values) | {
-        *PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES,
+        *NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES,
     }
 
 
@@ -359,12 +359,12 @@ class InitScaleProbeConfig:
             )
 
 # -------------------------------------------------------------------------- #
-# ------------------- probe execution & output generation ------------------ #
+# ------------------------ execution & output generation ------------------- #
 # -------------------------------------------------------------------------- #
 
 def _row_from_metrics(
     config: InitScaleProbeConfig,
-    binary_data: Mapping[str, Any],
+    data: Mapping[str, Any],
     n: int,
     m: int,
     alpha: float,
@@ -376,7 +376,7 @@ def _row_from_metrics(
     metrics: Mapping[str, float],
 ) -> Dict[str, Any]:
     """
-    Build one raw CSV row from scalar probe metrics.
+    Build one raw CSV row from scalar metrics.
 
     `metrics` is expected to map every configured tracked metric name to a
     scalar numeric value, e.g. float or int. Tuple/list-valued metrics are not
@@ -389,7 +389,7 @@ def _row_from_metrics(
         "dataset": config.dataset,
         "init_type": config.init_type,
         "n": int(n),
-        "n_effective": int(binary_data["n_effective"]),
+        "n_effective": int(data["n_effective"]),
         "m": int(m),
         "alpha": float(alpha),
         "beta": float(beta),
@@ -406,7 +406,7 @@ def _row_from_metrics(
 
 def _rows_for_trained_initialization(
     config: InitScaleProbeConfig,
-    binary_data: Mapping[str, Any],
+    data: Mapping[str, Any],
     n: int,
     m: int,
     alpha: float,
@@ -415,13 +415,13 @@ def _rows_for_trained_initialization(
     init_seed: int,
     device: str,
 ) -> List[Dict[str, Any]]:
-    """Train one scalar binary trajectory and emit rows at requested steps."""
+    """Train one scalar-output trajectory and emit rows at requested steps."""
     seed_training_run(init_seed, device)
 
-    X = binary_data["X_train"]
-    y = binary_data["y_train_binary"]
-    X_test = binary_data.get("X_test")
-    y_test = binary_data.get("y_test_binary")
+    X = data["X_train"]
+    y = data["y_train_binary"]
+    X_test = data.get("X_test")
+    y_test = data.get("y_test_binary")
     tracked_metrics = config.tracked_metrics or []
     requested_steps = set(int(step) for step in config.training_step_values)
     needs_initial_ntk = any(ntk_metric_needs_initial_matrix(name) for name in tracked_metrics)
@@ -432,14 +432,14 @@ def _rows_for_trained_initialization(
     def measure(training_step, base):
         nonlocal initial_ntk_matrix
         if needs_initial_ntk and initial_ntk_matrix is None:
-            initial_ntk_matrix = compute_binary_probe_ntk_matrix(
+            initial_ntk_matrix = compute_ntk_matrix(
                 base.model,
                 X,
                 batch_size=config.jacobian_batch_size,
             )
         if int(training_step) not in requested_steps:
             return
-        metrics = get_binary_probe_stats(
+        metrics = get_metrics(
             base.model,
             X,
             y,
@@ -453,7 +453,7 @@ def _rows_for_trained_initialization(
         rows.append(
             _row_from_metrics(
                 config,
-                binary_data,
+                data,
                 n=n,
                 m=m,
                 alpha=alpha,
@@ -467,7 +467,7 @@ def _rows_for_trained_initialization(
         )
 
     run_full_batch_training_checkpoints(
-        d_in=int(binary_data["d_in"]),
+        d_in=int(data["d_in"]),
         d_out=1,
         m=m,
         init_type=config.init_type,
@@ -525,7 +525,7 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
         for data_seed in config.data_seeds:
             for anisotropy_power in config.synthetic_anisotropy_powers or [config.synthetic_anisotropy_power]:
                 run_config = replace(config, synthetic_anisotropy_power=float(anisotropy_power))
-                binary_data = load_binary_classification_data(
+                data = load_binary_classification_data(
                     dataset=run_config.dataset,
                     n=n,
                     negative_classes=run_config.negative_classes,
@@ -546,7 +546,7 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
                                 rows.extend(
                                     _rows_for_trained_initialization(
                                         run_config,
-                                        binary_data,
+                                        data,
                                         n=n,
                                         m=m,
                                         alpha=alpha,
@@ -683,7 +683,7 @@ def _add_loss_weighted_average_metrics(summary: Dict[str, Any]) -> None:
         return
     loss_mean = float(loss_mean)
 
-    for out_name, (_, product_name) in PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES.items():
+    for out_name, (_, product_name) in NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES.items():
         product_key = f"{product_name}_mean"
         if product_key in summary:
             summary[f"{out_name}_mean"] = _safe_average_ratio(float(summary[product_key]), loss_mean)

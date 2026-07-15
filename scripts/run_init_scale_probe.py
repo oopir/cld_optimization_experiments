@@ -144,12 +144,12 @@ def load_mapping(path: Path) -> dict:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Run the binary initialization-scale probe.")
+    p = argparse.ArgumentParser(description="Run the initialization-scale experiment.")
     p.add_argument(
         "--config",
         type=Path,
         required=True,
-        help="Path to YAML/JSON probe config.",
+        help="Path to YAML/JSON experiment config.",
     )
     p.add_argument(
         "--output-dir",

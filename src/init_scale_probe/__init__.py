@@ -1,4 +1,4 @@
-"""Binary initialization-scale probe package."""
+"""Initialization-scale experiment package."""
 
 __all__ = ["InitScaleProbeConfig", "plot_probe_from_rows", "run_probe"]
 

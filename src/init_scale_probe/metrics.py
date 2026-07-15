@@ -4,7 +4,7 @@ from typing import Dict, Optional, Sequence, Tuple
 import torch
 
 
-BINARY_CORE_METRICS = (
+CORE_METRICS = (
     "mean_abs_output",
     "mean_preactivation_norm",
     "mean_preactivation_norm_normalized",
@@ -14,7 +14,7 @@ BINARY_CORE_METRICS = (
     "empirical_loss_grad_norm",
 )
 
-BINARY_FORWARD_METRICS = (
+FORWARD_METRICS = (
     "mean_abs_output",
     "mean_preactivation_norm",
     "mean_preactivation_norm_normalized",
@@ -22,30 +22,30 @@ BINARY_FORWARD_METRICS = (
     "empirical_loss",
 )
 
-BINARY_TEST_METRICS = (
+TEST_METRICS = (
     "test_error",
 )
 
-BINARY_CLASSIFICATION_ERROR_METRICS = (
+CLASSIFICATION_ERROR_METRICS = (
     "train_error",
     "test_error",
 )
 
-BINARY_OUTPUT_GRAD_METRICS = (
+OUTPUT_GRAD_METRICS = (
     "mean_output_grad_norm",
     "mean_output_grad_norm_fc1",
     "mean_output_grad_norm_fc2",
     "mean_output_grad_norm_fc2_normalized",
 )
 
-BINARY_EMPIRICAL_LOSS_GRAD_METRICS = (
+EMPIRICAL_LOSS_GRAD_METRICS = (
     "empirical_loss_grad_norm",
     "empirical_loss_grad_norm_fc1",
     "empirical_loss_grad_norm_fc2",
     "empirical_loss_grad_norm_fc2_normalized",
 )
 
-BINARY_LAYERWISE_METRICS = (
+LAYERWISE_METRICS = (
     "mean_output_grad_norm_fc1",
     "mean_output_grad_norm_fc2",
     "mean_output_grad_norm_fc2_normalized",
@@ -54,7 +54,7 @@ BINARY_LAYERWISE_METRICS = (
     "empirical_loss_grad_norm_fc2_normalized",
 )
 
-BINARY_PARAMETER_METRICS = (
+PARAMETER_METRICS = (
     "fc1_weight_fro_norm",
     "fc1_weight_fro_norm_normalized",
     "fc1_weight_spectral_norm",
@@ -62,14 +62,14 @@ BINARY_PARAMETER_METRICS = (
     "fc2_weight_euclidean_norm",
 )
 
-PROBE_NTK_EIGEN_METRICS = (
+NTK_EIGEN_METRICS = (
     "ntk_eig_min",
     "ntk_eig_max",
     "ntk_eig_mean",
     "ntk_eig_median",
 )
 
-PROBE_NTK_ALIGNMENT_METRICS = (
+NTK_ALIGNMENT_METRICS = (
     "residual_ntk_alignment",
     "residual_ntk_alignment_over_ntk_eig_min",
     "residual_ntk_alignment_over_ntk_eig_mean",
@@ -79,7 +79,7 @@ PROBE_NTK_ALIGNMENT_METRICS = (
     "residual_ntk_alignment_residual_dynamics_term",
     "residual_ntk_alignment_ntk_dynamics_term",
 )
-PROBE_NTK_DRIFT_METRICS = (
+NTK_DRIFT_METRICS = (
     "residual_initial_ntk_alignment",
     "residual_ntk_alignment_over_initial",
     "residual_ntk_alignment_trace_normalized_over_initial",
@@ -90,7 +90,7 @@ PROBE_NTK_DRIFT_METRICS = (
     "ntk_cos_dist",
     "ntk_rel_fro_dist",
 )
-PROBE_NTK_INITIAL_MATRIX_METRICS = (
+NTK_INITIAL_MATRIX_METRICS = (
     "residual_initial_ntk_alignment",
     "residual_ntk_alignment_over_initial",
     "residual_ntk_alignment_trace_normalized_over_initial",
@@ -100,7 +100,7 @@ PROBE_NTK_INITIAL_MATRIX_METRICS = (
     "ntk_cos_dist",
     "ntk_rel_fro_dist",
 )
-PROBE_NTK_MATRIX_METRICS = PROBE_NTK_EIGEN_METRICS + (
+NTK_MATRIX_METRICS = NTK_EIGEN_METRICS + (
     "residual_ntk_alignment",
     "residual_ntk_alignment_over_ntk_eig_min",
     "residual_ntk_alignment_over_ntk_eig_mean",
@@ -116,34 +116,34 @@ PROBE_NTK_MATRIX_METRICS = PROBE_NTK_EIGEN_METRICS + (
     "ntk_cos_dist",
     "ntk_rel_fro_dist",
 )
-PROBE_NTK_HVP_METRICS = (
+NTK_HVP_METRICS = (
     "residual_ntk_alignment_ntk_dynamics_term",
 )
 
-PROBE_NTK_LABEL_ENERGY_PREFIX = "ntk_label_energy_top_"
-PROBE_NTK_RESIDUAL_ENERGY_PREFIX = "ntk_residual_energy_top_"
-PROBE_NTK_STATIC_METRICS = PROBE_NTK_EIGEN_METRICS + PROBE_NTK_ALIGNMENT_METRICS + PROBE_NTK_DRIFT_METRICS
-PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES = {
+NTK_LABEL_ENERGY_PREFIX = "ntk_label_energy_top_"
+NTK_RESIDUAL_ENERGY_PREFIX = "ntk_residual_energy_top_"
+NTK_STATIC_METRICS = NTK_EIGEN_METRICS + NTK_ALIGNMENT_METRICS + NTK_DRIFT_METRICS
+NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES = {
     "loss_weighted_residual_ntk_alignment": ("empirical_loss", "empirical_loss_times_residual_ntk_alignment"),
     "loss_weighted_ntk_eig_min": ("empirical_loss", "empirical_loss_times_ntk_eig_min"),
 }
-PROBE_NTK_LOSS_WEIGHTED_AVERAGE_METRICS = tuple(PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES)
-PROBE_NTK_LOSS_WEIGHTED_AVERAGE_BASE_METRICS = {
+NTK_LOSS_WEIGHTED_AVERAGE_METRICS = tuple(NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES)
+NTK_LOSS_WEIGHTED_AVERAGE_BASE_METRICS = {
     "loss_weighted_residual_ntk_alignment": "residual_ntk_alignment",
     "loss_weighted_ntk_eig_min": "ntk_eig_min",
 }
 
-BINARY_DEFAULT_METRICS = BINARY_CORE_METRICS + BINARY_LAYERWISE_METRICS + BINARY_PARAMETER_METRICS
-BINARY_ALL_METRICS = BINARY_DEFAULT_METRICS + BINARY_CLASSIFICATION_ERROR_METRICS + PROBE_NTK_STATIC_METRICS
-BINARY_GRADIENT_METRICS = BINARY_OUTPUT_GRAD_METRICS + BINARY_EMPIRICAL_LOSS_GRAD_METRICS
+DEFAULT_METRICS = CORE_METRICS + LAYERWISE_METRICS + PARAMETER_METRICS
+ALL_METRICS = DEFAULT_METRICS + CLASSIFICATION_ERROR_METRICS + NTK_STATIC_METRICS
+GRADIENT_METRICS = OUTPUT_GRAD_METRICS + EMPIRICAL_LOSS_GRAD_METRICS
 
 
 def append_k_to_ntk_label_energy_metric(k: int) -> str:
-    return f"{PROBE_NTK_LABEL_ENERGY_PREFIX}{int(k)}"
+    return f"{NTK_LABEL_ENERGY_PREFIX}{int(k)}"
 
 
 def append_k_to_ntk_residual_energy_metric(k: int) -> str:
-    return f"{PROBE_NTK_RESIDUAL_ENERGY_PREFIX}{int(k)}"
+    return f"{NTK_RESIDUAL_ENERGY_PREFIX}{int(k)}"
 
 
 def _parse_positive_int_suffix(name: str, prefix: str) -> Optional[int]:
@@ -157,11 +157,11 @@ def _parse_positive_int_suffix(name: str, prefix: str) -> Optional[int]:
 
 
 def parse_ntk_label_energy_metric(name: str) -> Optional[int]:
-    return _parse_positive_int_suffix(name, PROBE_NTK_LABEL_ENERGY_PREFIX)
+    return _parse_positive_int_suffix(name, NTK_LABEL_ENERGY_PREFIX)
 
 
 def parse_ntk_residual_energy_metric(name: str) -> Optional[int]:
-    return _parse_positive_int_suffix(name, PROBE_NTK_RESIDUAL_ENERGY_PREFIX)
+    return _parse_positive_int_suffix(name, NTK_RESIDUAL_ENERGY_PREFIX)
 
 
 def parse_ntk_energy_metric(name: str) -> Optional[int]:
@@ -170,31 +170,31 @@ def parse_ntk_energy_metric(name: str) -> Optional[int]:
 
 
 def is_ntk_metric(name: str) -> bool:
-    return name in PROBE_NTK_STATIC_METRICS or parse_ntk_energy_metric(name) is not None
+    return name in NTK_STATIC_METRICS or parse_ntk_energy_metric(name) is not None
 
 
 def ntk_metric_needs_matrix(name: str) -> bool:
-    return name in PROBE_NTK_MATRIX_METRICS or ntk_metric_needs_initial_matrix(name) or parse_ntk_energy_metric(name) is not None
+    return name in NTK_MATRIX_METRICS or ntk_metric_needs_initial_matrix(name) or parse_ntk_energy_metric(name) is not None
 
 
 def ntk_metric_needs_initial_matrix(name: str) -> bool:
-    return name in PROBE_NTK_INITIAL_MATRIX_METRICS
+    return name in NTK_INITIAL_MATRIX_METRICS
 
 
 def ntk_metric_needs_hvp(name: str) -> bool:
-    return name in PROBE_NTK_HVP_METRICS
+    return name in NTK_HVP_METRICS
 
 
 def is_ntk_loss_weighted_average_metric(name: str) -> bool:
-    return name in PROBE_NTK_LOSS_WEIGHTED_AVERAGE_METRICS
+    return name in NTK_LOSS_WEIGHTED_AVERAGE_METRICS
 
 
 def ntk_loss_weighted_average_dependencies(name: str) -> Optional[Tuple[str, ...]]:
-    return PROBE_NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES.get(name)
+    return NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES.get(name)
 
 
 def ntk_loss_weighted_average_base_metric(name: str) -> Optional[str]:
-    return PROBE_NTK_LOSS_WEIGHTED_AVERAGE_BASE_METRICS.get(name)
+    return NTK_LOSS_WEIGHTED_AVERAGE_BASE_METRICS.get(name)
 
 
 def _output_scale(model) -> float:
@@ -218,7 +218,7 @@ def _metric_or_nan(value: Optional[torch.Tensor]) -> float:
 
 
 @torch.no_grad()
-def _binary_hidden_forward(
+def _hidden_forward(
     model,
     X: torch.Tensor,
     y: Optional[torch.Tensor] = None,
@@ -233,14 +233,14 @@ def _binary_hidden_forward(
 
 
 @torch.no_grad()
-def _compute_binary_forward_metrics(
+def _compute_forward_metrics(
     model,
     X: torch.Tensor,
     y: torch.Tensor,
     batch_size: int,
     metric_names: Sequence[str],
 ) -> Dict[str, float]:
-    """Compute scalar-output binary probe forward metrics."""
+    """Compute scalar-output forward metrics."""
     metric_names = set(metric_names)
     n = X.shape[0]
     totals = {name: 0.0 for name in metric_names}
@@ -281,13 +281,13 @@ def _compute_binary_forward_metrics(
 
 
 @torch.no_grad()
-def _compute_binary_error(
+def _compute_sign_classification_error(
     model,
     batch_size: int,
     X: torch.Tensor,
     y: torch.Tensor,
 ) -> float:
-    """Compute sign-threshold binary classification error on one tensor dataset."""
+    """Compute sign-threshold classification error on one tensor dataset."""
     n = X.shape[0]
     incorrect = 0
     for start in range(0, n, batch_size):
@@ -299,7 +299,7 @@ def _compute_binary_error(
 
 
 @torch.no_grad()
-def _compute_binary_classification_error_metrics(
+def _compute_classification_error_metrics(
     model,
     X: torch.Tensor,
     y: torch.Tensor,
@@ -308,25 +308,25 @@ def _compute_binary_classification_error_metrics(
     batch_size: int,
     metric_names: Sequence[str],
 ) -> Dict[str, float]:
-    """Compute sign-threshold binary classification error metrics."""
+    """Compute sign-threshold classification error metrics."""
     metric_names = set(metric_names)
     metrics: Dict[str, float] = {}
     if "train_error" in metric_names:
-        metrics["train_error"] = _compute_binary_error(model, batch_size=batch_size, X=X, y=y)
+        metrics["train_error"] = _compute_sign_classification_error(model, batch_size=batch_size, X=X, y=y)
     if "test_error" in metric_names:
         if X_test is None or y_test is None or X_test.shape[0] == 0:
             metrics["test_error"] = float("nan")
         else:
-            metrics["test_error"] = _compute_binary_error(model, batch_size=batch_size, X=X_test, y=y_test)
+            metrics["test_error"] = _compute_sign_classification_error(model, batch_size=batch_size, X=X_test, y=y_test)
     return metrics
 
 
 @torch.no_grad()
-def _compute_binary_parameter_metrics(
+def _compute_parameter_metrics(
     model,
     metric_names: Sequence[str],
 ) -> Dict[str, float]:
-    """Compute scalar probe parameter metrics at the current model state."""
+    """Compute scalar-output parameter metrics at the current model state."""
     metric_names = set(metric_names)
     W1 = model.fc1.weight.detach()
     W2 = model.fc2.weight.detach()
@@ -351,9 +351,9 @@ def _compute_binary_parameter_metrics(
         out["fc2_weight_euclidean_norm"] = float(torch.linalg.vector_norm(W2).item())
     return out
 
-# TODO: Simplify this control flow when revisiting the binary gradient metrics.
+# TODO: Simplify this control flow when revisiting the gradient metrics.
 @torch.no_grad()
-def _compute_binary_gradient_metrics(
+def _compute_gradient_metrics(
     model,
     X: torch.Tensor,
     y: torch.Tensor,
@@ -374,13 +374,13 @@ def _compute_binary_gradient_metrics(
     sqrt_m = math.sqrt(float(model.m))
     n = X.shape[0]
     metric_names = set(metric_names)
-    needs_output_grad = bool(metric_names & set(BINARY_OUTPUT_GRAD_METRICS))
-    needs_empirical_loss_grad = bool(metric_names & set(BINARY_EMPIRICAL_LOSS_GRAD_METRICS))
+    needs_output_grad = bool(metric_names & set(OUTPUT_GRAD_METRICS))
+    needs_empirical_loss_grad = bool(metric_names & set(EMPIRICAL_LOSS_GRAD_METRICS))
 
     emp_fc1_sum = torch.zeros_like(W1) if needs_empirical_loss_grad else None
     emp_fc2_sum = torch.zeros_like(W2) if needs_empirical_loss_grad else None
 
-    mean_metrics = tuple(metric_names & set(BINARY_OUTPUT_GRAD_METRICS))
+    mean_metrics = tuple(metric_names & set(OUTPUT_GRAD_METRICS))
     totals = {name: 0.0 for name in mean_metrics}
 
     for start in range(0, n, batch_size):
@@ -595,16 +595,16 @@ def _needs_ntk_matrix(metric_set: set, label_energy_ks: Sequence[int]) -> bool:
 
 
 def _needs_current_ntk_matrix(metric_set: set, label_energy_ks: Sequence[int]) -> bool:
-    return bool(label_energy_ks) or any(name in PROBE_NTK_MATRIX_METRICS for name in metric_set)
+    return bool(label_energy_ks) or any(name in NTK_MATRIX_METRICS for name in metric_set)
 
 
-def compute_binary_probe_ntk_matrix(
+def compute_ntk_matrix(
     model,
     X: torch.Tensor,
     batch_size: int = 256,
 ) -> torch.Tensor:
-    """Compute the scalar-output binary probe NTK matrix at the model's current state."""
-    h, _, activation_derivative, _ = _binary_hidden_forward(model, X)
+    """Compute the scalar-output NTK matrix at the model's current state."""
+    h, _, activation_derivative, _ = _hidden_forward(model, X)
     return _compute_ntk_matrix(model, X, h, activation_derivative, batch_size=batch_size).detach()
 
 
@@ -616,7 +616,7 @@ def _compute_ntk_metrics(
     metric_names: Sequence[str],
     initial_ntk_matrix: Optional[torch.Tensor] = None,
 ) -> Dict[str, float]:
-    """Compute requested raw-NTK spectral/alignment metrics for the scalar binary probe."""
+    """Compute requested raw-NTK spectral/alignment metrics for the scalar-output model."""
     metric_names = list(metric_names)
     metric_set = set(metric_names)
     label_energy_ks = sorted(
@@ -637,7 +637,7 @@ def _compute_ntk_metrics(
     needs_initial_matrix = any(ntk_metric_needs_initial_matrix(name) for name in metric_set)
 
     metrics: Dict[str, float] = {}
-    h, _, activation_derivative, residual = _binary_hidden_forward(model, X, y)
+    h, _, activation_derivative, residual = _hidden_forward(model, X, y)
     if residual is None:
         raise RuntimeError("Internal error: NTK metrics require residuals.")
     denom = residual.pow(2).sum()
@@ -780,7 +780,7 @@ def _compute_ntk_metrics(
     return metrics
 
 
-def get_binary_probe_stats(
+def get_metrics(
     model,
     X: torch.Tensor,
     y: torch.Tensor,
@@ -791,22 +791,22 @@ def get_binary_probe_stats(
     y_test: Optional[torch.Tensor] = None,
     initial_ntk_matrix: Optional[torch.Tensor] = None,
 ) -> Dict[str, float]:
-    """Compute the requested binary init-scale probe metrics."""
+    """Compute the requested init-scale metrics."""
     metric_names = list(metric_names)
-    forward_metrics = [name for name in metric_names if name in BINARY_FORWARD_METRICS]
-    classification_error_metrics = [name for name in metric_names if name in BINARY_CLASSIFICATION_ERROR_METRICS]
-    gradient_metrics = [name for name in metric_names if name in BINARY_GRADIENT_METRICS]
-    parameter_metrics = [name for name in metric_names if name in BINARY_PARAMETER_METRICS]
+    forward_metrics = [name for name in metric_names if name in FORWARD_METRICS]
+    classification_error_metrics = [name for name in metric_names if name in CLASSIFICATION_ERROR_METRICS]
+    gradient_metrics = [name for name in metric_names if name in GRADIENT_METRICS]
+    parameter_metrics = [name for name in metric_names if name in PARAMETER_METRICS]
     ntk_metrics = [name for name in metric_names if is_ntk_metric(name)]
 
     metrics: Dict[str, float] = {}
     if parameter_metrics:
-        metrics.update(_compute_binary_parameter_metrics(model, metric_names=parameter_metrics))
+        metrics.update(_compute_parameter_metrics(model, metric_names=parameter_metrics))
     if forward_metrics:
-        metrics.update(_compute_binary_forward_metrics(model, X, y, batch_size=batch_size, metric_names=forward_metrics))
+        metrics.update(_compute_forward_metrics(model, X, y, batch_size=batch_size, metric_names=forward_metrics))
     if classification_error_metrics:
         metrics.update(
-            _compute_binary_classification_error_metrics(
+            _compute_classification_error_metrics(
                 model,
                 X,
                 y,
@@ -818,7 +818,7 @@ def get_binary_probe_stats(
         )
     if gradient_metrics:
         metrics.update(
-            _compute_binary_gradient_metrics(
+            _compute_gradient_metrics(
                 model,
                 X,
                 y,
