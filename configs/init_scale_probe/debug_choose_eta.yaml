@@ -1,0 +1,64 @@
+probe:
+  dataset: mnist
+  random_labels: false
+  negative_classes: [0, 2, 4, 6, 8]
+  positive_classes: [1, 3, 5, 7, 9]
+
+  n_values: [32000]
+  m_values: [512]
+  init_type: standard
+
+  beta_values: [inf]
+  training_step_values: [0, 5000, 10000, 20000, 40000, 80000, 160000, 320000]
+  eta: 0.0010
+
+  num_data_seeds: 1
+  data_seed_start: 0
+  num_inits: 3
+  init_seed_start: 0
+
+  device: cuda
+  parallel: true
+  gpu_ids: [0,1,2,3,4,5]
+  adaptive_gpu_packing: true
+  gpu_memory_safety_fraction: 0.9
+  max_workers_per_gpu: 1
+  batch_size: 8192
+  jacobian_batch_size: 4096
+  init_chunk_size: 1
+
+  progress_interval_seconds: 600
+  progress_detail: grid
+
+  tracked_metrics:
+    - empirical_loss
+    - test_error
+
+    - ntk_eig_min
+    - ntk_eig_max
+    
+    - residual_ntk_alignment_trace_normalized_over_initial
+
+    - task_ntk_alignment_trace_normalized_over_initial
+
+    - ntk_cos_dist
+    - ntk_rel_fro_dist
+
+  plot_metrics:
+    - empirical_loss
+    - test_error
+
+    - ntk_eig_min
+    - ntk_eig_max
+    
+    - residual_ntk_alignment_trace_normalized_over_initial
+
+    - task_ntk_alignment_trace_normalized_over_initial
+
+    - ntk_cos_dist
+    - ntk_rel_fro_dist
+
+  plot_format: combined
+  plot_heatmaps: false
+
+  output_dir: plots/init_scale_probe/debug_eta_1e-3

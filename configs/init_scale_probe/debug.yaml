@@ -9,17 +9,17 @@ probe:
   init_type: standard
 
   beta_values: [inf]
-  training_step_values: [0, 10000, 20000, 40000, 80000, 120000, 160000, 240000, 320000]
-  eta: 0.0005
+  training_step_values: [0, 10000, 20000, 40000, 80000, 120000, 160000, 240000, 320000, 640000, 1000000]
+  eta: 0.001
 
-  num_data_seeds: 3
+  num_data_seeds: 1
   data_seed_start: 0
-  num_inits: 3
+  num_inits: 4
   init_seed_start: 0
 
   device: cuda
   parallel: true
-  # gpu_ids: [0,1,2,3]
+  gpu_ids: [0,1,2,3,4,5]
   adaptive_gpu_packing: true
   gpu_memory_safety_fraction: 0.9
   max_workers_per_gpu: 1
@@ -27,50 +27,64 @@ probe:
   jacobian_batch_size: 4096
   init_chunk_size: 1
 
-  # progress_interval_seconds: 120
+  progress_interval_seconds: 600
   progress_detail: grid
 
   tracked_metrics:
     - empirical_loss
+    - train_error
     - test_error
 
-    - ntk_eig_min
-    - ntk_eig_mean
-    - ntk_eig_max
+    - fc1_weight_fro_norm
+    - fc1_weight_fro_norm_normalized
+    - fc1_weight_spectral_norm
+    - fc1_weight_spectral_norm_normalized
+    - fc2_weight_euclidean_norm
+
+    # - ntk_eig_min
+    # - ntk_eig_mean
+    # - ntk_eig_max
     
-    - residual_ntk_alignment
-    - residual_initial_ntk_alignment
-    - residual_ntk_alignment_over_initial
-    - residual_ntk_alignment_trace_normalized_over_initial
+    # - residual_ntk_alignment
+    # - residual_initial_ntk_alignment
+    # - residual_ntk_alignment_over_initial
+    # - residual_ntk_alignment_trace_normalized_over_initial
 
-    - task_ntk_alignment
-    - task_initial_ntk_alignment
-    - task_ntk_alignment_over_initial
-    - task_ntk_alignment_trace_normalized_over_initial
+    # - task_ntk_alignment
+    # - task_initial_ntk_alignment
+    # - task_ntk_alignment_over_initial
+    # - task_ntk_alignment_trace_normalized_over_initial
 
-    - ntk_cos_dist
-    - ntk_rel_fro_dist
+    # - ntk_cos_dist
+    # - ntk_rel_fro_dist
 
   plot_metrics:
     - empirical_loss
+    - train_error
     - test_error
 
-    - ntk_eig_min
-    - ntk_eig_mean
-    - ntk_eig_max
+    - fc1_weight_fro_norm
+    - fc1_weight_fro_norm_normalized
+    - fc1_weight_spectral_norm
+    - fc1_weight_spectral_norm_normalized
+    - fc2_weight_euclidean_norm
+
+    # - ntk_eig_min
+    # - ntk_eig_mean
+    # - ntk_eig_max
     
-    - residual_ntk_alignment
-    - residual_ntk_alignment_over_initial
-    - residual_ntk_alignment_trace_normalized_over_initial
+    # - residual_ntk_alignment
+    # - residual_ntk_alignment_over_initial
+    # - residual_ntk_alignment_trace_normalized_over_initial
 
-    - task_ntk_alignment
-    - task_ntk_alignment_over_initial
-    - task_ntk_alignment_trace_normalized_over_initial
+    # - task_ntk_alignment
+    # - task_ntk_alignment_over_initial
+    # - task_ntk_alignment_trace_normalized_over_initial
 
-    - ntk_cos_dist
-    - ntk_rel_fro_dist
+    # - ntk_cos_dist
+    # - ntk_rel_fro_dist
 
   plot_format: combined
   plot_heatmaps: false
 
-  output_dir: plots/init_scale_probe/debug
+  output_dir: plots/init_scale_probe/debug_1e6_norms
