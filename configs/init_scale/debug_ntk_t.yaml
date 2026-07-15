@@ -1,4 +1,4 @@
-probe:
+experiment:
   dataset: mnist
   random_labels: false
 
@@ -96,4 +96,4 @@ probe:
   plot_format: combined
   plot_heatmaps: false
 
-  output_dir: plots/init_scale_probe/ntk_energy_mnist_time_true_y
+  output_dir: plots/init_scale/ntk_energy_mnist_time_true_y

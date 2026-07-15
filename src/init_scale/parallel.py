@@ -14,16 +14,16 @@ import torch
 from ..base.parallel import round_robin_device_names
 from ..base.data import DATASET_METADATA, load_binary_classification_data
 from .core import (
-    InitScaleProbeConfig,
+    InitScaleConfig,
     _rows_for_trained_initialization,
-    sort_probe_rows,
+    sort_rows,
     summarize_init_averaged_data_variability_rows,
     summarize_data_averaged_init_variability_rows,
     summarize_rows,
     write_csv,
 )
 from .metrics import ntk_metric_needs_hvp, ntk_metric_needs_matrix
-from .plotting import plot_probe_summaries
+from .plotting import plot_summaries
 
 MB = 1024 * 1024
 
@@ -56,7 +56,7 @@ class DeviceSlot:
 # ------------------------------ public entry ------------------------------ #
 # -------------------------------------------------------------------------- #
 
-def run_probe_parallel(config: InitScaleProbeConfig):
+def run_parallel(config: InitScaleConfig):
     """
     Main function.
     The parent process builds work items, chooses device slots, aggregates
@@ -80,7 +80,7 @@ def run_probe_parallel(config: InitScaleProbeConfig):
         rows = _run_items(config, items, slots)
 
     # Aggregate in a deterministic order so parallel and serial CSVs are comparable.
-    rows = sort_probe_rows(rows)
+    rows = sort_rows(rows)
     summary_rows = summarize_rows(rows, config.tracked_metrics or [], report_data_seed=config.report_data_seed)
     data_averaged_init_variability_rows = summarize_data_averaged_init_variability_rows(rows, config.tracked_metrics or [])
     init_averaged_data_variability_rows = summarize_init_averaged_data_variability_rows(rows, config.tracked_metrics or [])
@@ -94,7 +94,7 @@ def run_probe_parallel(config: InitScaleProbeConfig):
     write_csv(paths["rows"], rows)
     write_csv(paths["summary"], summary_rows)
     paths.update(
-        plot_probe_summaries(
+        plot_summaries(
             summary_rows,
             config,
             config.output_dir,
@@ -113,7 +113,7 @@ def _chunks(values: Sequence[int], chunk_size: int) -> Iterable[Sequence[int]]:
     for start in range(0, len(values), chunk_size):
         yield values[start:start + chunk_size]
 
-def _build_work_items(config: InitScaleProbeConfig) -> List[WorkItem]:
+def _build_work_items(config: InitScaleConfig) -> List[WorkItem]:
     """
     Create init-seed chunks for every point in the configured sweep grid.
     A WorkItem keeps `(n, data_seed, anisotropy, m, alpha, beta)` and groups several init seeds.
@@ -143,7 +143,7 @@ def _build_work_items(config: InitScaleProbeConfig) -> List[WorkItem]:
     return items
 
 
-def _sort_work_items_by_estimated_cost(config: InitScaleProbeConfig, items: Sequence[WorkItem]) -> List[WorkItem]:
+def _sort_work_items_by_estimated_cost(config: InitScaleConfig, items: Sequence[WorkItem]) -> List[WorkItem]:
     """Run larger estimated-memory jobs first to reduce the slow-job tail."""
     return sorted(items, key=lambda item: _static_memory_estimate_mb(config, item), reverse=True)
 
@@ -159,12 +159,12 @@ def _resolve_base_device(device: str) -> str:
         raise RuntimeError(f"Requested device {device!r}, but CUDA is unavailable.")
     return "cuda" if device.startswith("cuda") else "cpu"
 
-def _cpu_slots(config: InitScaleProbeConfig, items: Sequence[WorkItem]) -> List[DeviceSlot]:
+def _cpu_slots(config: InitScaleConfig, items: Sequence[WorkItem]) -> List[DeviceSlot]:
     # Reuse max_workers_per_gpu as the CPU worker cap; there is no CPU-specific knob yet.
     count = min(len(items), max(1, config.max_workers_per_gpu))
     return [DeviceSlot("cpu") for _ in range(max(1, count))]
 
-def _cuda_slots(config: InitScaleProbeConfig, items: Sequence[WorkItem], device: str) -> List[DeviceSlot]:
+def _cuda_slots(config: InitScaleConfig, items: Sequence[WorkItem], device: str) -> List[DeviceSlot]:
     """
     Create CUDA worker slots from selected GPUs and estimated memory budget.
     With adaptive packing, each GPU gets roughly
@@ -174,7 +174,7 @@ def _cuda_slots(config: InitScaleProbeConfig, items: Sequence[WorkItem], device:
     """
     gpu_ids = _gpu_ids(config, device)
     if not gpu_ids:
-        raise RuntimeError("No CUDA GPUs were selected for the parallel probe.")
+        raise RuntimeError("No CUDA GPUs were selected for the parallel init-scale experiment.")
 
     if not config.adaptive_gpu_packing:
         per_gpu = {idx: config.max_workers_per_gpu for idx in gpu_ids}
@@ -204,7 +204,7 @@ def _round_robin_cuda_slots(
         for device in round_robin_device_names(per_gpu, ordered_devices=gpu_ids)
     ]
 
-def _gpu_ids(config: InitScaleProbeConfig, device: str) -> List[int]:
+def _gpu_ids(config: InitScaleConfig, device: str) -> List[int]:
     if config.gpu_ids is not None:
         return list(config.gpu_ids)
     if ":" in config.device:
@@ -215,7 +215,7 @@ def _gpu_ids(config: InitScaleProbeConfig, device: str) -> List[int]:
 # -------------------------- memory and profiling -------------------------- #
 # -------------------------------------------------------------------------- #
 
-def _profile_items(config: InitScaleProbeConfig, items: Sequence[WorkItem], device: str) -> List[WorkItem]:
+def _profile_items(config: InitScaleConfig, items: Sequence[WorkItem], device: str) -> List[WorkItem]:
     "Calibrate one representative per shape to see which batch sizes actually run ok."
     if not config.adaptive_gpu_packing or not items:
         return list(items)
@@ -251,7 +251,7 @@ def _profile_items(config: InitScaleProbeConfig, items: Sequence[WorkItem], devi
         for item in items
     ]
 
-def _gpu_memory_budget_mb(config: InitScaleProbeConfig, gpu_idx: int) -> float:
+def _gpu_memory_budget_mb(config: InitScaleConfig, gpu_idx: int) -> float:
     "Estimate usable free GPU memory after safety and reservation margins."
     free_mb = None
 
@@ -297,7 +297,7 @@ def _print_slots(label: str, slots: Sequence[DeviceSlot]) -> None:
         flush=True,
     )
 
-def _static_memory_estimate_mb(config: InitScaleProbeConfig, item: WorkItem) -> float:
+def _static_memory_estimate_mb(config: InitScaleConfig, item: WorkItem) -> float:
     """
     Conservatively approximate one worker process's peak tensor memory.
     This estimates the live tensors for one work item on one device: the
@@ -353,7 +353,7 @@ def _is_ntk_hvp_metric_name(name: str) -> bool:
 # -------------------------------------------------------------------------- #
 
 def _run_items(
-    config: InitScaleProbeConfig,
+    config: InitScaleConfig,
     items: Sequence[WorkItem],
     slots: Sequence[DeviceSlot],
 ) -> List[Dict[str, Any]]:
@@ -364,7 +364,7 @@ def _run_items(
     return rows
 
 def _run_profile_items(
-    config: InitScaleProbeConfig,
+    config: InitScaleConfig,
     items: Sequence[WorkItem],
     slots: Sequence[DeviceSlot],
 ) -> List[Tuple[WorkItem, Mapping[str, Any]]]:
@@ -377,7 +377,7 @@ def _run_profile_items(
     return list(_run_scheduled_items(config, items, slots, phase="profiling"))
 
 def _run_scheduled_items(
-    config: InitScaleProbeConfig,
+    config: InitScaleConfig,
     items: Sequence[WorkItem],
     slots: Sequence[DeviceSlot],
     phase: str,
@@ -443,7 +443,7 @@ def _run_scheduled_items(
 def _submit_to_pool(
     pool: ProcessPoolExecutor,
     futures: Dict[Any, Tuple[WorkItem, DeviceSlot]],
-    config: InitScaleProbeConfig,
+    config: InitScaleConfig,
     item: WorkItem,
     slot: DeviceSlot,
     tracker: "_RunTracker",
@@ -668,7 +668,7 @@ class _ProgressPrinter:
 # --------------------------- worker execution ----------------------------- #
 # -------------------------------------------------------------------------- #
 
-def _run_item_with_retries(config: InitScaleProbeConfig, item: WorkItem, device: str) -> Dict[str, Any]:
+def _run_item_with_retries(config: InitScaleConfig, item: WorkItem, device: str) -> Dict[str, Any]:
     "Run one item, shrinking batch sizes after CUDA OOM when enabled."
     current = item
     while True:
@@ -681,7 +681,7 @@ def _run_item_with_retries(config: InitScaleProbeConfig, item: WorkItem, device:
             return result
         current = retry
 
-def _run_one_item(config: InitScaleProbeConfig, item: WorkItem, device: str) -> Dict[str, Any]:
+def _run_one_item(config: InitScaleConfig, item: WorkItem, device: str) -> Dict[str, Any]:
     """
     Load data on one device and evaluate every init seed in the work item.
     data_seed is used here; init_seeds each produce one trajectory over the
@@ -752,7 +752,7 @@ def _run_one_item(config: InitScaleProbeConfig, item: WorkItem, device: str) -> 
     except Exception as exc:
         return {"ok": False, "oom": False, "error": str(exc)}
 
-def _shrink_after_oom(item: WorkItem, config: InitScaleProbeConfig) -> WorkItem:
+def _shrink_after_oom(item: WorkItem, config: InitScaleConfig) -> WorkItem:
     new_jac = _shrunk(item.jacobian_batch_size, config)
     if new_jac < item.jacobian_batch_size:
         return replace(item, jacobian_batch_size=new_jac)
@@ -761,7 +761,7 @@ def _shrink_after_oom(item: WorkItem, config: InitScaleProbeConfig) -> WorkItem:
         return replace(item, batch_size=new_batch)
     return item
 
-def _shrunk(value: int, config: InitScaleProbeConfig) -> int:
+def _shrunk(value: int, config: InitScaleConfig) -> int:
     """Shrink a batch size by the configured OOM factor without crossing minimum."""
     if value <= config.min_batch_size:
         return value
@@ -771,7 +771,7 @@ def _checked_worker_result(result: Mapping[str, Any], item: WorkItem) -> List[Di
     if result.get("ok"):
         return list(result["rows"])
     raise RuntimeError(
-        "Probe worker failed for "
+        "Init-scale worker failed for "
         f"n={item.n}, data_seed={item.data_seed}, m={item.m}, "
         f"anisotropy={item.synthetic_anisotropy_power}, alpha={item.alpha}, "
         f"beta={item.beta}, init_seeds={list(item.init_seeds)}: "

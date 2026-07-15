@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter, NullLocator, ScalarFormatter
 import numpy as np
 
-from .core import ALL_METRICS, SWEEP_AXES, InitScaleProbeConfig
+from .core import ALL_METRICS, SWEEP_AXES, InitScaleConfig
 
 LEGACY_METRICS = (
     "mean_loss",
@@ -110,9 +110,9 @@ GROUPED_METRIC_PDFS = (
 # ------------------------------- line plots ------------------------------- #
 # -------------------------------------------------------------------------- #
 
-def plot_probe_summaries(
+def plot_summaries(
     summary_rows: Sequence[Mapping[str, Any]],
-    config: InitScaleProbeConfig,
+    config: InitScaleConfig,
     output_dir: Path,
     data_averaged_init_variability_rows: Optional[Sequence[Mapping[str, Any]]] = None,
     init_averaged_data_variability_rows: Optional[Sequence[Mapping[str, Any]]] = None,
@@ -120,7 +120,7 @@ def plot_probe_summaries(
     """Create all configured plot outputs from the already-aggregated summary rows."""
     paths: Dict[str, Path] = {}
     output_dir.mkdir(parents=True, exist_ok=True)
-    _clear_probe_plot_files(output_dir, metric_names=config.plot_metrics)
+    _clear_plot_files(output_dir, metric_names=config.plot_metrics)
     if not summary_rows:
         return paths
 
@@ -183,12 +183,12 @@ def plot_probe_summaries(
     return paths
 
 
-def _is_initialization_only(config: InitScaleProbeConfig) -> bool:
+def _is_initialization_only(config: InitScaleConfig) -> bool:
     """Return True when the run has no training-step sweep."""
     return len(tuple(config.training_step_values or [])) == 1
 
 
-def _has_anisotropy_sweep(config: InitScaleProbeConfig) -> bool:
+def _has_anisotropy_sweep(config: InitScaleConfig) -> bool:
     """Return True when synthetic anisotropy power is an active sweep axis."""
     return len(tuple(config.synthetic_anisotropy_powers or [])) > 1
 
@@ -233,7 +233,7 @@ def _unique_metric_names(metric_names: Sequence[str]) -> List[str]:
 
 def _plot_grouped_training_metric_pdfs(
     summary_rows: Sequence[Mapping[str, Any]],
-    config: InitScaleProbeConfig,
+    config: InitScaleConfig,
     output_dir: Path,
     grouped_metrics: Mapping[str, Sequence[str]],
 ) -> Dict[str, Path]:
@@ -276,7 +276,7 @@ def _save_grouped_metric_pdfs(
 
 def _plot_initialization_only_summaries(
     summary_rows: Sequence[Mapping[str, Any]],
-    config: InitScaleProbeConfig,
+    config: InitScaleConfig,
     output_dir: Path,
     data_averaged_init_variability_rows: Optional[Sequence[Mapping[str, Any]]],
     init_averaged_data_variability_rows: Optional[Sequence[Mapping[str, Any]]],
@@ -590,7 +590,7 @@ def _draw_metric_line_panel(
 
 
 def _plot_anisotropy_summaries(
-    config: InitScaleProbeConfig,
+    config: InitScaleConfig,
     output_dir: Path,
     data_averaged_init_variability_rows: Optional[Sequence[Mapping[str, Any]]],
     init_averaged_data_variability_rows: Optional[Sequence[Mapping[str, Any]]],
@@ -1296,8 +1296,8 @@ def _save_figures_pdf_equal_width(figures: Sequence[Optional[plt.Figure]], path:
     return True
 
 
-def _clear_probe_plot_files(output_dir: Path, metric_names: Sequence[str] = ()) -> None:
-    """Remove stale PDF plots from all generations of this probe."""
+def _clear_plot_files(output_dir: Path, metric_names: Sequence[str] = ()) -> None:
+    """Remove stale PDF plots from all generations of this experiment."""
     for path in (
         output_dir / "anisotropy_metrics.pdf",
         output_dir / "initialization_metrics.pdf",
@@ -1550,14 +1550,14 @@ def _draw_metric_text(
         return
 
     if ha == "center":
-        base_probe = fig.text(0.0, 0.0, base_label, ha="left", va=va, fontsize=fontsize, alpha=0.0)
-        suffix_probe = fig.text(0.0, 0.0, scaling_suffix, ha="left", va=va, fontsize=fontsize, alpha=0.0)
+        base_text = fig.text(0.0, 0.0, base_label, ha="left", va=va, fontsize=fontsize, alpha=0.0)
+        suffix_text = fig.text(0.0, 0.0, scaling_suffix, ha="left", va=va, fontsize=fontsize, alpha=0.0)
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
-        base_width = base_probe.get_window_extent(renderer=renderer).width / fig.bbox.width
-        suffix_width = suffix_probe.get_window_extent(renderer=renderer).width / fig.bbox.width
-        base_probe.remove()
-        suffix_probe.remove()
+        base_width = base_text.get_window_extent(renderer=renderer).width / fig.bbox.width
+        suffix_width = suffix_text.get_window_extent(renderer=renderer).width / fig.bbox.width
+        base_text.remove()
+        suffix_text.remove()
         start_x = x - 0.5 * (base_width + suffix_width)
         fig.text(start_x, y, base_label, ha="left", va=va, fontsize=fontsize)
         fig.text(start_x + base_width, y, scaling_suffix, ha="left", va=va, fontsize=fontsize, color="red")

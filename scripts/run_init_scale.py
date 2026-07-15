@@ -15,13 +15,13 @@ if Path.cwd().resolve() != REPO_ROOT:
     raise SystemExit(
         "Run this script from the repository root so relative paths, configs, "
         f"and imports resolve consistently:\n  cd {REPO_ROOT}\n"
-        "  python scripts/run_init_scale_probe.py --config <path>"
+        "  python scripts/run_init_scale.py --config <path>"
     )
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 os.environ["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
-from src.init_scale_probe import InitScaleProbeConfig, plot_probe_from_rows, run_probe
+from src.init_scale import InitScaleConfig, plot_from_rows, run_experiment
 
 SHORT_LIST_LIMIT = 12
 INIT_SEED_LIST_LIMIT = 8
@@ -155,13 +155,13 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=None,
-        help="Override probe.output_dir from the config.",
+        help="Override experiment.output_dir from the config.",
     )
     p.add_argument(
         "--device",
         type=str,
         default=None,
-        help="Override probe.device from the config, e.g. cpu, cuda, cuda:0, auto.",
+        help="Override experiment.device from the config, e.g. cpu, cuda, cuda:0, auto.",
     )
     p.add_argument(
         "--plot-only",
@@ -172,7 +172,7 @@ def parse_args() -> argparse.Namespace:
         "--rows-csv",
         type=Path,
         default=None,
-        help="Raw rows CSV for --plot-only. Defaults to probe.output_dir/_init_scale_rows.csv.",
+        help="Raw rows CSV for --plot-only. Defaults to experiment.output_dir/_init_scale_rows.csv.",
     )
     return p.parse_args()
 
@@ -180,8 +180,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     mapping = load_mapping(args.config)
-    config_kwargs = dict(mapping.get("probe", mapping))
-    config = InitScaleProbeConfig(**config_kwargs)
+    if "probe" in mapping:
+        raise ValueError("Config key 'probe' was renamed to 'experiment'. Please update the YAML/JSON file.")
+    config_kwargs = dict(mapping.get("experiment", mapping))
+    config = InitScaleConfig(**config_kwargs)
 
     if args.output_dir is not None:
         config.output_dir = args.output_dir.expanduser()
@@ -192,9 +194,9 @@ def main() -> None:
     print(dump_compact_json(compact_config(asdict(config))))
 
     if args.plot_only:
-        rows, summary_rows, paths = plot_probe_from_rows(config, rows_path=args.rows_csv)
+        rows, summary_rows, paths = plot_from_rows(config, rows_path=args.rows_csv)
     else:
-        rows, summary_rows, paths = run_probe(config)
+        rows, summary_rows, paths = run_experiment(config)
     print(f"raw rows: {len(rows)}")
     print(f"summary rows: {len(summary_rows)}")
     print(f"rows CSV: {paths['rows']}")

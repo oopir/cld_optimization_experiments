@@ -133,7 +133,7 @@ def _resolve_tracked_metrics_for_plots(tracked_metrics: Optional[Sequence[str]],
 # -------------------------------------------------------------------------- #
 
 @dataclass
-class InitScaleProbeConfig:
+class InitScaleConfig:
     # data
     dataset: str = "digits"
     random_labels: bool = False
@@ -185,7 +185,7 @@ class InitScaleProbeConfig:
     plot_format: str = "combined"
     plot_heatmaps: bool = True
     # output
-    output_dir: Path = Path("plots/init_scale_probe/debug")
+    output_dir: Path = Path("plots/init_scale/debug")
 
     def __post_init__(self):
         self.n_values = [int(x) for x in self.n_values]
@@ -363,7 +363,7 @@ class InitScaleProbeConfig:
 # -------------------------------------------------------------------------- #
 
 def _row_from_metrics(
-    config: InitScaleProbeConfig,
+    config: InitScaleConfig,
     data: Mapping[str, Any],
     n: int,
     m: int,
@@ -405,7 +405,7 @@ def _row_from_metrics(
     return row
 
 def _rows_for_trained_initialization(
-    config: InitScaleProbeConfig,
+    config: InitScaleConfig,
     data: Mapping[str, Any],
     n: int,
     m: int,
@@ -486,7 +486,7 @@ def _rows_for_trained_initialization(
     )
     return rows
 
-def sort_probe_rows(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+def sort_rows(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     """Return rows in a stable order across serial and parallel runs."""
     return [
         dict(row)
@@ -505,10 +505,10 @@ def sort_probe_rows(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
         )
     ]
 
-def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Path]]:
+def run_experiment(config: InitScaleConfig) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Path]]:
     if config.parallel:
-        from .parallel import run_probe_parallel
-        return run_probe_parallel(config)
+        from .parallel import run_parallel
+        return run_parallel(config)
 
     device = config.device
     if device == "auto":
@@ -557,7 +557,7 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
                                     )
                                 )
 
-    rows = sort_probe_rows(rows)
+    rows = sort_rows(rows)
 
     summary_rows = summarize_rows(rows, config.tracked_metrics or [], report_data_seed=config.report_data_seed)
     data_averaged_init_variability_rows = summarize_data_averaged_init_variability_rows(rows, config.tracked_metrics or [])
@@ -569,9 +569,9 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
     }
     write_csv(paths["rows"], rows)
     write_csv(paths["summary"], summary_rows)
-    from .plotting import plot_probe_summaries
+    from .plotting import plot_summaries
 
-    plot_paths = plot_probe_summaries(
+    plot_paths = plot_summaries(
         summary_rows,
         config,
         output_dir,
@@ -581,8 +581,8 @@ def run_probe(config: InitScaleProbeConfig) -> Tuple[List[Dict[str, Any]], List[
     paths.update(plot_paths)
     return rows, summary_rows, paths
 
-def plot_probe_from_rows(
-    config: InitScaleProbeConfig,
+def plot_from_rows(
+    config: InitScaleConfig,
     rows_path: Optional[Path] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Path]]:
     """Regenerate summaries and plots from a saved raw rows CSV."""
@@ -590,7 +590,7 @@ def plot_probe_from_rows(
     rows = read_csv(rows_path)
     if not rows:
         raise ValueError(f"Rows CSV is empty: {rows_path}")
-    rows = sort_probe_rows(rows)
+    rows = sort_rows(rows)
 
     missing_plot_metrics = [
         name for name in config.plot_metrics
@@ -614,10 +614,10 @@ def plot_probe_from_rows(
         "summary": config.output_dir / "_init_scale_summary.csv",
     }
     write_csv(paths["summary"], summary_rows)
-    from .plotting import plot_probe_summaries
+    from .plotting import plot_summaries
 
     paths.update(
-        plot_probe_summaries(
+        plot_summaries(
             summary_rows,
             config,
             config.output_dir,

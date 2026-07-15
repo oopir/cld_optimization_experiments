@@ -1,4 +1,4 @@
-probe:
+experiment:
   dataset: synthetic_isotropic
   synthetic_d_in: 64
   # synthetic_anisotropy_powers: [0, 0.5, 1, 2]
@@ -54,4 +54,4 @@ probe:
   plot_format: combined  # combined | individual | both
   plot_heatmaps: false
 
-  output_dir: plots/init_scale_probe/m_sweep_rand_labels
+  output_dir: plots/init_scale/m_sweep_rand_labels

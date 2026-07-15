@@ -1,4 +1,4 @@
-probe:
+experiment:
   dataset: mnist
   random_labels: false
   negative_classes: [0, 2, 4, 6, 8]
@@ -41,4 +41,4 @@ probe:
   plot_format: combined
   plot_heatmaps: false
 
-  output_dir: plots/init_scale_probe/medium-scale-320000-steps
+  output_dir: plots/init_scale/medium-scale-320000-steps
