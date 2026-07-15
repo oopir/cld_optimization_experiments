@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+import textwrap
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import matplotlib
@@ -14,6 +15,9 @@ from matplotlib.ticker import NullFormatter, NullLocator, ScalarFormatter
 import numpy as np
 
 from .core import ALL_METRICS, SWEEP_AXES, InitScaleConfig
+
+PDF_PAD_INCHES = 0.08
+TRAINING_TITLE_WRAP_WIDTH = 52
 
 LEGACY_METRICS = (
     "mean_loss",
@@ -831,8 +835,11 @@ def _make_training_curves_figure(
     x_tick_values = [_training_step_plot_value(value, x_uses_log_scale) for value in step_tick_values]
     y_uses_log_scale = _training_curve_uses_log_y(metric_name, rows, mean_key)
 
-    fig_width = max(3.4 * len(beta_values) + 1.0, 4.6)
-    fig_height = max(2.25 * len(n_values) + 1.0, 3.4)
+    has_width_legend = len(m_values) > 1
+    title = _wrap_figure_text(f"{_metric_label(metric_name)} vs training steps", width=TRAINING_TITLE_WRAP_WIDTH)
+    title_line_count = title.count("\n") + 1
+    fig_width = max(3.4 * len(beta_values) + (1.7 if has_width_legend else 0.9), 5.2)
+    fig_height = max(2.35 * len(n_values) + 1.35 + 0.22 * (title_line_count - 1), 3.8)
     fig, axes = plt.subplots(
         len(n_values),
         len(beta_values),
@@ -840,7 +847,7 @@ def _make_training_curves_figure(
         squeeze=False,
         sharex=True,
         sharey=True,
-        constrained_layout=True,
+        constrained_layout=False,
     )
     colors = plt.cm.viridis(np.linspace(0.1, 0.9, max(len(m_values), 1)))
     color_by_m = {m_value: colors[idx] for idx, m_value in enumerate(m_values)}
@@ -889,14 +896,35 @@ def _make_training_curves_figure(
             ax.grid(False)
             if row_idx == len(n_values) - 1:
                 ax.set_xlabel(_training_step_axis_label(x_uses_log_scale))
+            if col_idx == 0:
+                ax.set_ylabel("mean value")
             if col_idx == len(beta_values) - 1:
-                ax.yaxis.set_label_position("right")
-                ax.set_ylabel(f"n={_format_value(n)}", rotation=0, labelpad=28, va="center")
+                ax.annotate(
+                    f"n={_format_value(n)}",
+                    xy=(1.0, 0.5),
+                    xycoords="axes fraction",
+                    xytext=(12, 0),
+                    textcoords="offset points",
+                    ha="left",
+                    va="center",
+                    fontsize=9,
+                    annotation_clip=False,
+                )
             if _uses_zero_reference_line(metric_name):
                 ax.axhline(0.0, color="0.35", linewidth=0.8, linestyle="--", alpha=0.8)
             if _uses_one_reference_line(metric_name):
                 ax.axhline(1.0, color="0.35", linewidth=0.8, linestyle="--", alpha=0.8)
 
+    top = 0.74 if title_line_count > 1 else 0.80
+    right = 0.74 if seen_m_values else 0.90
+    fig.subplots_adjust(
+        left=0.20,
+        right=right,
+        bottom=0.18,
+        top=top,
+        wspace=0.30,
+        hspace=0.42,
+    )
     if seen_m_values:
         m_handles = [
             Line2D([0], [0], color=color_by_m[m], marker="o", linestyle="-", linewidth=2.0, markersize=5)
@@ -907,12 +935,13 @@ def _make_training_curves_figure(
         fig.legend(
             m_handles,
             m_labels,
-            loc="outside right upper",
+            loc="upper left",
+            bbox_to_anchor=(right + 0.04, top),
+            borderaxespad=0.0,
             frameon=False,
             title="width",
         )
-    fig.suptitle(f"{_metric_label(metric_name)} vs training steps", fontsize=13)
-    fig.supylabel(_metric_label(metric_name), fontsize=10)
+    fig.suptitle(title, fontsize=12, y=0.965)
     return fig
 
 
@@ -1021,16 +1050,27 @@ def _make_nm_heatmaps_figure(
     vmin = float(finite_transformed.min())
     vmax = float(finite_transformed.max())
 
-    fig_width = max(3.3 * len(step_values) + 1.0, 4.6)
-    fig_height = max(2.4 * len(n_values) + 0.9, 3.8)
+    title = _wrap_figure_text(f"{_metric_label(metric_name)} over beta and m", width=72)
+    title_line_count = title.count("\n") + 1
+    fig_width = max(3.3 * len(step_values) + 1.7, 5.4)
+    fig_height = max(2.4 * len(n_values) + 1.4 + 0.18 * (title_line_count - 1), 4.2)
     fig, axes = plt.subplots(
         len(n_values),
         len(step_values),
         figsize=(fig_width, fig_height),
         squeeze=False,
-        constrained_layout=True,
+        constrained_layout=False,
     )
-    n_value_offset_points = 44
+    top = max(0.58, min(0.78, 0.95 - (1.0 + 0.18 * (title_line_count - 1)) / fig_height))
+    fig.subplots_adjust(
+        left=0.07,
+        right=0.82,
+        bottom=0.16,
+        top=top,
+        wspace=0.38,
+        hspace=0.48,
+    )
+    n_value_offset_points = 34
     image = None
     axes_used = []
     for idx, (n, step, matrix, m_values, beta_panel_values) in enumerate(transformed):
@@ -1074,7 +1114,7 @@ def _make_nm_heatmaps_figure(
 
     if image is not None:
         label = f"log10({_metric_label(metric_name)} mean)" if use_log else f"{_metric_label(metric_name)} mean"
-        colorbar = fig.colorbar(image, ax=axes_used, shrink=0.85)
+        colorbar = fig.colorbar(image, ax=axes_used, shrink=0.85, pad=0.04)
         _draw_metric_colorbar_label(colorbar.ax, label, metric_name)
     fig.canvas.draw()
     grid_left = axes[0][0].get_position().x0
@@ -1090,7 +1130,7 @@ def _make_nm_heatmaps_figure(
     step_label_y = grid_top + 48 * points_to_fig_y
     step_divider_y = grid_top + 26 * points_to_fig_y
 
-    fig.text(0.5 * (grid_left + grid_right), title_y, f"{_metric_label(metric_name)} over beta and m", ha="center", va="bottom", fontsize=13)
+    fig.text(0.5 * (grid_left + grid_right), title_y, title, ha="center", va="bottom", fontsize=13)
     fig.text(n_title_x, 0.5 * (grid_bottom + grid_top), _axis_label("n"), ha="center", va="center", rotation=90, fontsize=10)
     fig.add_artist(Line2D(
         [n_beta_divider_x, n_beta_divider_x],
@@ -1133,15 +1173,16 @@ def _make_final_test_error_vs_m_figure(
     if not beta_values or not n_values or not m_values:
         return None
 
-    fig_width = max(3.4 * len(beta_values) + 1.4, 4.8)
-    fig_height = 3.7
+    has_sample_size_legend = bool(n_values)
+    fig_width = max(3.4 * len(beta_values) + (1.7 if has_sample_size_legend else 0.9), 5.2)
+    fig_height = 3.8
     fig, axes = plt.subplots(
         1,
         len(beta_values),
         figsize=(fig_width, fig_height),
         squeeze=False,
         sharey=True,
-        constrained_layout=True,
+        constrained_layout=False,
     )
     colors = plt.cm.viridis(np.linspace(0.1, 0.9, max(len(n_values), 1)))
     color_by_n = {n_value: colors[idx] for idx, n_value in enumerate(n_values)}
@@ -1191,6 +1232,15 @@ def _make_final_test_error_vs_m_figure(
             ax.set_ylabel(_metric_label("test_error"))
         ax.grid(False)
 
+    right = 0.74 if seen_n_values else 0.90
+    fig.subplots_adjust(
+        left=0.15,
+        right=right,
+        bottom=0.18,
+        top=0.78,
+        wspace=0.30,
+    )
+
     if seen_n_values:
         n_handles = [
             Line2D([0], [0], color=color_by_n[n], marker="o", linestyle="-", linewidth=2.0, markersize=5)
@@ -1201,11 +1251,13 @@ def _make_final_test_error_vs_m_figure(
         fig.legend(
             n_handles,
             n_labels,
-            loc="outside right upper",
+            loc="upper left",
+            bbox_to_anchor=(right + 0.04, 0.78),
+            borderaxespad=0.0,
             frameon=False,
             title="sample size",
         )
-    fig.suptitle(f"Final test error vs width (final step={_format_value(final_step)})", fontsize=13)
+    fig.suptitle(f"Final test error vs width (final step={_format_value(final_step)})", fontsize=13, y=0.965)
     return fig
 
 
@@ -1271,9 +1323,10 @@ def _save_figures_pdf(figures: Sequence[Optional[plt.Figure]], path: Path) -> bo
     if not valid_figures:
         return False
     if len(valid_figures) == 1:
-        valid_figures[0].savefig(path, bbox_inches="tight")
+        valid_figures[0].savefig(path, bbox_inches="tight", pad_inches=PDF_PAD_INCHES)
         plt.close(valid_figures[0])
         return True
+    _normalize_pdf_page_size(valid_figures)
     with PdfPages(path) as pdf:
         for fig in valid_figures:
             pdf.savefig(fig)
@@ -1282,18 +1335,24 @@ def _save_figures_pdf(figures: Sequence[Optional[plt.Figure]], path: Path) -> bo
 
 
 def _save_figures_pdf_equal_width(figures: Sequence[Optional[plt.Figure]], path: Path) -> bool:
-    """Save figures as a multipage PDF after normalizing page widths."""
+    """Save figures as a multipage PDF after normalizing page dimensions."""
     valid_figures = [fig for fig in figures if fig is not None]
     if not valid_figures:
         return False
-    max_width = max(float(fig.get_figwidth()) for fig in valid_figures)
-    for fig in valid_figures:
-        fig.set_size_inches(max_width, fig.get_figheight(), forward=True)
+    _normalize_pdf_page_size(valid_figures)
     with PdfPages(path) as pdf:
         for fig in valid_figures:
             pdf.savefig(fig)
             plt.close(fig)
     return True
+
+
+def _normalize_pdf_page_size(figures: Sequence[plt.Figure]) -> None:
+    """Give every page in a multipage PDF the same explicit canvas size."""
+    max_width = max(float(fig.get_figwidth()) for fig in figures)
+    max_height = max(float(fig.get_figheight()) for fig in figures)
+    for fig in figures:
+        fig.set_size_inches(max_width, max_height, forward=True)
 
 
 def _clear_plot_files(output_dir: Path, metric_names: Sequence[str] = ()) -> None:
@@ -1363,6 +1422,28 @@ def _unique_values(rows: Sequence[Mapping[str, Any]], axis: Optional[str]) -> Tu
 def _single_metric_pages(values: Sequence[str]) -> List[Sequence[str]]:
     """Split values into one metric per page."""
     return [[value] for value in values]
+
+
+def _wrap_figure_text(text: str, width: int = TRAINING_TITLE_WRAP_WIDTH) -> str:
+    """Wrap figure-level text to at most two balanced lines."""
+    lines = textwrap.wrap(text, width=width, break_long_words=False, break_on_hyphens=False)
+    if len(lines) <= 2:
+        return "\n".join(lines)
+
+    words = text.split()
+    if len(words) <= 1:
+        return text
+    total_chars = sum(len(word) for word in words) + len(words) - 1
+    target = total_chars / 2.0
+    best_idx = 1
+    best_delta = float("inf")
+    for idx in range(1, len(words)):
+        left = " ".join(words[:idx])
+        delta = abs(len(left) - target)
+        if delta < best_delta:
+            best_idx = idx
+            best_delta = delta
+    return " ".join(words[:best_idx]) + "\n" + " ".join(words[best_idx:])
 
 
 def _metric_label(name: str) -> str:
