@@ -565,10 +565,9 @@ def run_experiment(config: InitScaleConfig) -> Tuple[List[Dict[str, Any]], List[
 
     paths = {
         "rows": output_dir / "_init_scale_rows.csv",
-        "summary": output_dir / "_init_scale_summary.csv",
     }
+    _remove_stale_summary_csv(output_dir)
     write_csv(paths["rows"], rows)
-    write_csv(paths["summary"], summary_rows)
     from .plotting import plot_summaries
 
     plot_paths = plot_summaries(
@@ -611,9 +610,8 @@ def plot_from_rows(
     config.output_dir.mkdir(parents=True, exist_ok=True)
     paths = {
         "rows": rows_path,
-        "summary": config.output_dir / "_init_scale_summary.csv",
     }
-    write_csv(paths["summary"], summary_rows)
+    _remove_stale_summary_csv(config.output_dir)
     from .plotting import plot_summaries
 
     paths.update(
@@ -832,6 +830,14 @@ def write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _remove_stale_summary_csv(output_dir: Path) -> None:
+    """Remove the old persisted summary CSV if this output directory has one."""
+    summary_path = output_dir / "_init_scale_summary.csv"
+    if summary_path.exists():
+        summary_path.unlink()
+
 
 def read_csv(path: Path) -> List[Dict[str, Any]]:
     """Read a CSV and coerce obvious numeric scalar fields."""

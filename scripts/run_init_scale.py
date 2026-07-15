@@ -200,7 +200,6 @@ def main() -> None:
     print(f"raw rows: {len(rows)}")
     print(f"summary rows: {len(summary_rows)}")
     print(f"rows CSV: {paths['rows']}")
-    print(f"summary CSV: {paths['summary']}")
     plot_count = len([key for key in paths if key.startswith("plot_")])
     print(f"plots: {plot_count}")
 

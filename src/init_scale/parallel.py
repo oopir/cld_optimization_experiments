@@ -15,6 +15,7 @@ from ..base.parallel import round_robin_device_names
 from ..base.data import DATASET_METADATA, load_binary_classification_data
 from .core import (
     InitScaleConfig,
+    _remove_stale_summary_csv,
     _rows_for_trained_initialization,
     sort_rows,
     summarize_init_averaged_data_variability_rows,
@@ -89,10 +90,9 @@ def run_parallel(config: InitScaleConfig):
     config.output_dir.mkdir(parents=True, exist_ok=True)
     paths = {
         "rows": config.output_dir / "_init_scale_rows.csv",
-        "summary": config.output_dir / "_init_scale_summary.csv",
     }
+    _remove_stale_summary_csv(config.output_dir)
     write_csv(paths["rows"], rows)
-    write_csv(paths["summary"], summary_rows)
     paths.update(
         plot_summaries(
             summary_rows,
