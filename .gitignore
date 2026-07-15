@@ -5,6 +5,9 @@ plots/
 # Logs
 *.log
 
+# model ckpts
+*.pt
+
 # Python cache
 __pycache__/
 *.py[cod]
