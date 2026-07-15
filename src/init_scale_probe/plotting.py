@@ -28,7 +28,15 @@ LEGACY_METRICS = (
 INITIALIZATION_FIXED_AXES = ("alpha", "beta", "training_steps", "synthetic_anisotropy_power")
 LOSS_GROUP_METRICS = (
     "empirical_loss",
+    "train_error",
     "test_error",
+)
+PARAMETER_NORM_GROUP_METRICS = (
+    "fc1_weight_fro_norm",
+    "fc1_weight_fro_norm_normalized",
+    "fc1_weight_spectral_norm",
+    "fc1_weight_spectral_norm_normalized",
+    "fc2_weight_euclidean_norm",
 )
 NTK_SPECTRUM_GROUP_METRICS = (
     "ntk_eig_min",
@@ -88,6 +96,7 @@ TRAINING_LOG_Y_METRICS = (
 )
 GROUPED_METRIC_PDFS = (
     ("loss", LOSS_GROUP_METRICS),
+    ("parameter_norms", PARAMETER_NORM_GROUP_METRICS),
     ("ntk_spectrum_metrics", NTK_SPECTRUM_GROUP_METRICS),
     ("ntk_energy_metrics", ("ntk_label_energy_top_", "ntk_residual_energy_top_")),
     ("residual_ntk_alignment_metrics", RESIDUAL_NTK_ALIGNMENT_GROUP_METRICS),
@@ -1295,6 +1304,8 @@ def _clear_probe_plot_files(output_dir: Path, metric_names: Sequence[str] = ()) 
         output_dir / "nm_metrics.pdf",
         output_dir / "ntk_spectrum_metrics.pdf",
         output_dir / "ntk_spectrum_metrics_nm_heatmaps.pdf",
+        output_dir / "parameter_norms.pdf",
+        output_dir / "parameter_norms_nm_heatmaps.pdf",
         output_dir / "ntk_eig_metrics.pdf",
         output_dir / "ntk_eig_metrics_nm_heatmaps.pdf",
         output_dir / "ntk_energy_metrics.pdf",
@@ -1357,12 +1368,16 @@ def _single_metric_pages(values: Sequence[str]) -> List[Sequence[str]]:
 def _metric_label(name: str) -> str:
     """Human-readable metric label for titles and axes."""
     normalized_labels = {
+        "train_error": "train error",
         "test_error": "test error",
         "mean_preactivation_norm_normalized": "mean preactivation norm / sqrt(m)",
         "mean_output_grad_norm_fc2_normalized": "mean output grad norm fc2 / sqrt(m)",
         "empirical_loss_grad_norm_fc2_normalized": "empirical loss grad norm fc2 / sqrt(m)",
-        "fc1_weight_fro_norm_normalized": "fc1 weight fro norm / sqrt(m)",
-        "fc1_weight_spectral_norm_normalized": "fc1 weight spectral norm / (1 + sqrt(m/d_in))",
+        "fc1_weight_fro_norm": "hidden layer Frobenius norm",
+        "fc1_weight_fro_norm_normalized": "hidden layer Frobenius norm / sqrt(m)",
+        "fc1_weight_spectral_norm": "hidden layer spectral norm",
+        "fc1_weight_spectral_norm_normalized": "hidden layer spectral norm / (1 + sqrt(m/d_in))",
+        "fc2_weight_euclidean_norm": "output layer Euclidean norm",
         "ntk_eig_min": "ntk eig min",
         "ntk_eig_max": "ntk eig max",
         "ntk_eig_mean": "ntk eig mean",

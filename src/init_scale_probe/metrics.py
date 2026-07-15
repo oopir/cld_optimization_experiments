@@ -26,6 +26,11 @@ BINARY_TEST_METRICS = (
     "test_error",
 )
 
+BINARY_CLASSIFICATION_ERROR_METRICS = (
+    "train_error",
+    "test_error",
+)
+
 BINARY_OUTPUT_GRAD_METRICS = (
     "mean_output_grad_norm",
     "mean_output_grad_norm_fc1",
@@ -54,6 +59,7 @@ BINARY_PARAMETER_METRICS = (
     "fc1_weight_fro_norm_normalized",
     "fc1_weight_spectral_norm",
     "fc1_weight_spectral_norm_normalized",
+    "fc2_weight_euclidean_norm",
 )
 
 PROBE_NTK_EIGEN_METRICS = (
@@ -128,7 +134,7 @@ PROBE_NTK_LOSS_WEIGHTED_AVERAGE_BASE_METRICS = {
 }
 
 BINARY_DEFAULT_METRICS = BINARY_CORE_METRICS + BINARY_LAYERWISE_METRICS + BINARY_PARAMETER_METRICS
-BINARY_ALL_METRICS = BINARY_DEFAULT_METRICS + BINARY_TEST_METRICS + PROBE_NTK_STATIC_METRICS
+BINARY_ALL_METRICS = BINARY_DEFAULT_METRICS + BINARY_CLASSIFICATION_ERROR_METRICS + PROBE_NTK_STATIC_METRICS
 BINARY_GRADIENT_METRICS = BINARY_OUTPUT_GRAD_METRICS + BINARY_EMPIRICAL_LOSS_GRAD_METRICS
 
 
@@ -275,28 +281,44 @@ def _compute_binary_forward_metrics(
 
 
 @torch.no_grad()
-def _compute_binary_test_metrics(
+def _compute_binary_error(
     model,
+    batch_size: int,
+    X: torch.Tensor,
+    y: torch.Tensor,
+) -> float:
+    """Compute sign-threshold binary classification error on one tensor dataset."""
+    n = X.shape[0]
+    incorrect = 0
+    for start in range(0, n, batch_size):
+        end = min(start + batch_size, n)
+        out = model(X[start:end]).view(-1)
+        pred = torch.where(out >= 0, 1.0, -1.0).to(dtype=y.dtype, device=y.device)
+        incorrect += int((pred != y[start:end].view(-1)).sum().item())
+    return incorrect / n
+
+
+@torch.no_grad()
+def _compute_binary_classification_error_metrics(
+    model,
+    X: torch.Tensor,
+    y: torch.Tensor,
     X_test: Optional[torch.Tensor],
     y_test: Optional[torch.Tensor],
     batch_size: int,
     metric_names: Sequence[str],
 ) -> Dict[str, float]:
-    """Compute sign-threshold binary classification metrics on held-out data."""
+    """Compute sign-threshold binary classification error metrics."""
     metric_names = set(metric_names)
-    if "test_error" not in metric_names:
-        return {}
-    if X_test is None or y_test is None or X_test.shape[0] == 0:
-        return {"test_error": float("nan")}
-
-    n = X_test.shape[0]
-    incorrect = 0
-    for start in range(0, n, batch_size):
-        end = min(start + batch_size, n)
-        out = model(X_test[start:end]).view(-1)
-        pred = torch.where(out >= 0, 1.0, -1.0).to(dtype=y_test.dtype, device=y_test.device)
-        incorrect += int((pred != y_test[start:end].view(-1)).sum().item())
-    return {"test_error": incorrect / n}
+    metrics: Dict[str, float] = {}
+    if "train_error" in metric_names:
+        metrics["train_error"] = _compute_binary_error(model, batch_size=batch_size, X=X, y=y)
+    if "test_error" in metric_names:
+        if X_test is None or y_test is None or X_test.shape[0] == 0:
+            metrics["test_error"] = float("nan")
+        else:
+            metrics["test_error"] = _compute_binary_error(model, batch_size=batch_size, X=X_test, y=y_test)
+    return metrics
 
 
 @torch.no_grad()
@@ -307,6 +329,7 @@ def _compute_binary_parameter_metrics(
     """Compute scalar probe parameter metrics at the current model state."""
     metric_names = set(metric_names)
     W1 = model.fc1.weight.detach()
+    W2 = model.fc2.weight.detach()
     sqrt_m = math.sqrt(float(model.m))
     spectral_scale = 1.0 + math.sqrt(float(model.m) / float(model.d_in))
     out: Dict[str, float] = {}
@@ -324,6 +347,8 @@ def _compute_binary_parameter_metrics(
             out["fc1_weight_spectral_norm"] = spectral_norm
         if "fc1_weight_spectral_norm_normalized" in metric_names:
             out["fc1_weight_spectral_norm_normalized"] = spectral_norm / spectral_scale
+    if "fc2_weight_euclidean_norm" in metric_names:
+        out["fc2_weight_euclidean_norm"] = float(torch.linalg.vector_norm(W2).item())
     return out
 
 # TODO: Simplify this control flow when revisiting the binary gradient metrics.
@@ -769,7 +794,7 @@ def get_binary_probe_stats(
     """Compute the requested binary init-scale probe metrics."""
     metric_names = list(metric_names)
     forward_metrics = [name for name in metric_names if name in BINARY_FORWARD_METRICS]
-    test_metrics = [name for name in metric_names if name in BINARY_TEST_METRICS]
+    classification_error_metrics = [name for name in metric_names if name in BINARY_CLASSIFICATION_ERROR_METRICS]
     gradient_metrics = [name for name in metric_names if name in BINARY_GRADIENT_METRICS]
     parameter_metrics = [name for name in metric_names if name in BINARY_PARAMETER_METRICS]
     ntk_metrics = [name for name in metric_names if is_ntk_metric(name)]
@@ -779,8 +804,18 @@ def get_binary_probe_stats(
         metrics.update(_compute_binary_parameter_metrics(model, metric_names=parameter_metrics))
     if forward_metrics:
         metrics.update(_compute_binary_forward_metrics(model, X, y, batch_size=batch_size, metric_names=forward_metrics))
-    if test_metrics:
-        metrics.update(_compute_binary_test_metrics(model, X_test, y_test, batch_size=batch_size, metric_names=test_metrics))
+    if classification_error_metrics:
+        metrics.update(
+            _compute_binary_classification_error_metrics(
+                model,
+                X,
+                y,
+                X_test,
+                y_test,
+                batch_size=batch_size,
+                metric_names=classification_error_metrics,
+            )
+        )
     if gradient_metrics:
         metrics.update(
             _compute_binary_gradient_metrics(
