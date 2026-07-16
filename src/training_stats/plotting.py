@@ -14,7 +14,11 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter, NullLocator, ScalarFormatter
 import numpy as np
 
-from .core import ALL_METRICS, SWEEP_AXES, InitScaleConfig
+from .sweep import ALL_METRICS, SWEEP_AXES
+
+# -------------------------------------------------------------------------- #
+# ------------------------------- constants -------------------------------- #
+# -------------------------------------------------------------------------- #
 
 PDF_PAD_INCHES = 0.08
 TRAINING_TITLE_WRAP_WIDTH = 52
@@ -111,17 +115,53 @@ GROUPED_METRIC_PDFS = (
 
 
 # -------------------------------------------------------------------------- #
-# ------------------------------- line plots ------------------------------- #
+# ----------------------------- public entrypoints ------------------------- #
 # -------------------------------------------------------------------------- #
 
-def plot_summaries(
+def plot_initialization_summaries(
     summary_rows: Sequence[Mapping[str, Any]],
-    config: InitScaleConfig,
+    config: Any,
     output_dir: Path,
     data_averaged_init_variability_rows: Optional[Sequence[Mapping[str, Any]]] = None,
     init_averaged_data_variability_rows: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> Dict[str, Path]:
-    """Create all configured plot outputs from the already-aggregated summary rows."""
+    """Create initialization/n-m/anisotropy plot outputs only."""
+    paths: Dict[str, Path] = {}
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _clear_plot_files(output_dir, metric_names=config.plot_metrics)
+    if not summary_rows:
+        return paths
+
+    if not _is_initialization_only(config):
+        raise ValueError("plot_initialization_summaries requires one fixed training step.")
+
+    if not _has_anisotropy_sweep(config):
+        paths.update(
+            _plot_initialization_only_summaries(
+                summary_rows,
+                config,
+                output_dir,
+                data_averaged_init_variability_rows=data_averaged_init_variability_rows,
+                init_averaged_data_variability_rows=init_averaged_data_variability_rows,
+            )
+        )
+    paths.update(
+        _plot_anisotropy_summaries(
+            config,
+            output_dir,
+            data_averaged_init_variability_rows=data_averaged_init_variability_rows,
+            init_averaged_data_variability_rows=init_averaged_data_variability_rows,
+        )
+    )
+    return paths
+
+
+def plot_training_summaries(
+    summary_rows: Sequence[Mapping[str, Any]],
+    config: Any,
+    output_dir: Path,
+) -> Dict[str, Path]:
+    """Create training-step curve and heatmap plot outputs only."""
     paths: Dict[str, Path] = {}
     output_dir.mkdir(parents=True, exist_ok=True)
     _clear_plot_files(output_dir, metric_names=config.plot_metrics)
@@ -129,25 +169,7 @@ def plot_summaries(
         return paths
 
     if _is_initialization_only(config):
-        if not _has_anisotropy_sweep(config):
-            paths.update(
-                _plot_initialization_only_summaries(
-                    summary_rows,
-                    config,
-                    output_dir,
-                    data_averaged_init_variability_rows=data_averaged_init_variability_rows,
-                    init_averaged_data_variability_rows=init_averaged_data_variability_rows,
-                )
-            )
-        paths.update(
-            _plot_anisotropy_summaries(
-                config,
-                output_dir,
-                data_averaged_init_variability_rows=data_averaged_init_variability_rows,
-                init_averaged_data_variability_rows=init_averaged_data_variability_rows,
-            )
-        )
-        return paths
+        raise ValueError("plot_training_summaries requires multiple training steps.")
 
     grouped_metrics = _grouped_metric_names(config.plot_metrics)
     grouped_metric_names = {name for names in grouped_metrics.values() for name in names}
@@ -176,26 +198,41 @@ def plot_summaries(
     if config.plot_format in {"combined", "both"}:
         paths.update(_plot_grouped_training_metric_pdfs(summary_rows, config, output_dir, grouped_metrics))
 
-    paths.update(
-        _plot_anisotropy_summaries(
+    return paths
+
+
+def plot_summaries(
+    summary_rows: Sequence[Mapping[str, Any]],
+    config: Any,
+    output_dir: Path,
+    data_averaged_init_variability_rows: Optional[Sequence[Mapping[str, Any]]] = None,
+    init_averaged_data_variability_rows: Optional[Sequence[Mapping[str, Any]]] = None,
+) -> Dict[str, Path]:
+    """Compatibility wrapper that dispatches to the explicit plot entrypoint."""
+    if _is_initialization_only(config):
+        return plot_initialization_summaries(
+            summary_rows,
             config,
             output_dir,
             data_averaged_init_variability_rows=data_averaged_init_variability_rows,
             init_averaged_data_variability_rows=init_averaged_data_variability_rows,
         )
-    )
-    return paths
+    return plot_training_summaries(summary_rows, config, output_dir)
 
 
-def _is_initialization_only(config: InitScaleConfig) -> bool:
+def _is_initialization_only(config: Any) -> bool:
     """Return True when the run has no training-step sweep."""
     return len(tuple(config.training_step_values or [])) == 1
 
 
-def _has_anisotropy_sweep(config: InitScaleConfig) -> bool:
+def _has_anisotropy_sweep(config: Any) -> bool:
     """Return True when synthetic anisotropy power is an active sweep axis."""
     return len(tuple(config.synthetic_anisotropy_powers or [])) > 1
 
+
+# -------------------------------------------------------------------------- #
+# ---------------------------- metric grouping ----------------------------- #
+# -------------------------------------------------------------------------- #
 
 def _grouped_metric_names(metric_names: Sequence[str]) -> Dict[str, List[str]]:
     """Return configured metric groups that should be written as grouped PDFs."""
@@ -237,7 +274,7 @@ def _unique_metric_names(metric_names: Sequence[str]) -> List[str]:
 
 def _plot_grouped_training_metric_pdfs(
     summary_rows: Sequence[Mapping[str, Any]],
-    config: InitScaleConfig,
+    config: Any,
     output_dir: Path,
     grouped_metrics: Mapping[str, Sequence[str]],
 ) -> Dict[str, Path]:
@@ -278,9 +315,13 @@ def _save_grouped_metric_pdfs(
     return paths
 
 
+# -------------------------------------------------------------------------- #
+# -------------------------- initialization plots -------------------------- #
+# -------------------------------------------------------------------------- #
+
 def _plot_initialization_only_summaries(
     summary_rows: Sequence[Mapping[str, Any]],
-    config: InitScaleConfig,
+    config: Any,
     output_dir: Path,
     data_averaged_init_variability_rows: Optional[Sequence[Mapping[str, Any]]],
     init_averaged_data_variability_rows: Optional[Sequence[Mapping[str, Any]]],
@@ -452,7 +493,6 @@ def _draw_metric_row(
         metric_name,
         x_axis=x_axis,
         title="mean over all seeds; \nSD of data-averaged values across init seeds",
-        # title="Avg over data seeds; SD across init seeds",
         ylim=ylim,
         ylabel="mean value",
         show_legend=False,
@@ -474,7 +514,6 @@ def _draw_metric_row(
             metric_name,
             x_axis=x_axis,
             title="mean over all seeds; \nSD of init-averaged values across data seeds",
-            # title="Avg over init seeds; SD across data seeds",
             ylim=ylim,
             ylabel="mean value",
             show_legend=False,
@@ -496,7 +535,6 @@ def _draw_metric_row(
             metric_name,
             x_axis=x_axis,
             title="mean over all seeds; \nSD of init-averaged values across data seeds",
-            # title="Avg over init seeds; SD across data seeds",
             ylim=ylim,
             ylabel="mean value",
             show_legend=False,
@@ -593,8 +631,12 @@ def _draw_metric_line_panel(
         ax.legend(frameon=False, fontsize=8, title="sample size n")
 
 
+# -------------------------------------------------------------------------- #
+# ---------------------------- anisotropy plots ---------------------------- #
+# -------------------------------------------------------------------------- #
+
 def _plot_anisotropy_summaries(
-    config: InitScaleConfig,
+    config: Any,
     output_dir: Path,
     data_averaged_init_variability_rows: Optional[Sequence[Mapping[str, Any]]],
     init_averaged_data_variability_rows: Optional[Sequence[Mapping[str, Any]]],
@@ -809,6 +851,10 @@ def _label_state_from_bool(random_labels: bool) -> str:
     return "random labels" if random_labels else "true labels"
 
 
+# -------------------------------------------------------------------------- #
+# ----------------------------- training plots ----------------------------- #
+# -------------------------------------------------------------------------- #
+
 def _make_training_curves_figure(
     summary_rows: Sequence[Mapping[str, Any]],
     metric_name: str,
@@ -981,6 +1027,7 @@ def _training_step_tick_values(
 
 
 def _training_step_axis_label(use_log_scale: bool) -> str:
+    """Return the training-step x-axis label for linear or shifted-log plots."""
     label = _axis_label("training_steps")
     if use_log_scale:
         label += ", log(step + 1)"
@@ -992,6 +1039,7 @@ def _training_curve_uses_log_y(
     rows: Sequence[Mapping[str, Any]],
     mean_key: str,
 ) -> bool:
+    """Return whether a training curve can safely use a log y-axis."""
     if not _prefers_training_log_y(metric_name):
         return False
     values = np.asarray([float(row[mean_key]) for row in rows if np.isfinite(float(row[mean_key]))], dtype=float)
@@ -999,6 +1047,7 @@ def _training_curve_uses_log_y(
 
 
 def _prefers_training_log_y(metric_name: str) -> bool:
+    """Return whether a metric is visually clearer on a log training curve."""
     # NTK energy metrics are positive, but they are bounded fractions; keep their y-axis linear.
     return metric_name in TRAINING_LOG_Y_METRICS
 
@@ -1261,6 +1310,10 @@ def _make_final_test_error_vs_m_figure(
     return fig
 
 
+# -------------------------------------------------------------------------- #
+# ----------------------------- plot data helpers -------------------------- #
+# -------------------------------------------------------------------------- #
+
 def _metric_ylim(
     row_sets: Sequence[Sequence[Mapping[str, Any]]],
     metric_name: str,
@@ -1309,7 +1362,7 @@ def _heatmap_matrix(
 
 
 # -------------------------------------------------------------------------- #
-# ------------------------------- utilities -------------------------------- #
+# ------------------------------- file utils ------------------------------- #
 # -------------------------------------------------------------------------- #
 
 def _save_figure_pdf(fig: Optional[plt.Figure], path: Path) -> bool:
@@ -1390,7 +1443,7 @@ def _clear_plot_files(output_dir: Path, metric_names: Sequence[str] = ()) -> Non
         for axis in SWEEP_AXES:
             for path in (
                 output_dir / f"{metric_name}_vs_{axis}.pdf",
-                output_dir / f"init_scale_{metric_name}_vs_{axis}.pdf",
+                output_dir / f"at_init_stats_{metric_name}_vs_{axis}.pdf",
             ):
                 if path.exists():
                     path.unlink()
@@ -1411,6 +1464,10 @@ def _clear_plot_files(output_dir: Path, metric_names: Sequence[str] = ()) -> Non
     for path in output_dir.glob("ntk_residual_energy_top_*.pdf"):
         path.unlink()
 
+
+# -------------------------------------------------------------------------- #
+# -------------------------- labels and formatting ------------------------- #
+# -------------------------------------------------------------------------- #
 
 def _unique_values(rows: Sequence[Mapping[str, Any]], axis: Optional[str]) -> Tuple[Any, ...]:
     """Return sorted unique values for a sweep axis."""
@@ -1493,24 +1550,29 @@ def _metric_label(name: str) -> str:
 
 
 def _is_ntk_label_energy_metric(name: str) -> bool:
+    """Return whether a metric is a top-k NTK label-energy metric."""
     prefix = "ntk_label_energy_top_"
     return name.startswith(prefix) and name[len(prefix):].isdigit()
 
 
 def _is_ntk_residual_energy_metric(name: str) -> bool:
+    """Return whether a metric is a top-k NTK residual-energy metric."""
     prefix = "ntk_residual_energy_top_"
     return name.startswith(prefix) and name[len(prefix):].isdigit()
 
 
 def _is_ntk_energy_metric(name: str) -> bool:
+    """Return whether a metric is any top-k NTK energy metric."""
     return _is_ntk_label_energy_metric(name) or _is_ntk_residual_energy_metric(name)
 
 
 def _uses_zero_reference_line(metric_name: str) -> bool:
+    """Return whether plots for this metric should show y=0."""
     return metric_name in NTK_ALIGNMENT_DYNAMICS_GROUP_METRICS
 
 
 def _uses_one_reference_line(metric_name: str) -> bool:
+    """Return whether plots for this metric should show y=1."""
     return metric_name.endswith("_over_initial")
 
 

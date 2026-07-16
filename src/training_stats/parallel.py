@@ -5,29 +5,38 @@ from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass, replace
 import math
 import multiprocessing as mp
+from pathlib import Path
 import subprocess
 import time
-from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 import torch
 
 from ..base.parallel import round_robin_device_names
-from ..base.data import DATASET_METADATA, load_binary_classification_data
-from .core import (
-    InitScaleConfig,
-    _remove_stale_summary_csv,
+from ..base.data import DATASET_METADATA
+from .core import TrainingStatsConfig
+from .sweep import (
     _rows_for_trained_initialization,
+    load_sweep_data,
     sort_rows,
+    summarize_training_stats_rows,
     summarize_init_averaged_data_variability_rows,
     summarize_data_averaged_init_variability_rows,
-    summarize_rows,
-    write_csv,
+    write_rows_output,
 )
 from .metrics import ntk_metric_needs_hvp, ntk_metric_needs_matrix
-from .plotting import plot_summaries
+from .plotting import plot_training_summaries
+
+# -------------------------------------------------------------------------- #
+# ------------------------------- constants -------------------------------- #
+# -------------------------------------------------------------------------- #
 
 MB = 1024 * 1024
 
+
+# -------------------------------------------------------------------------- #
+# ------------------------------- dataclasses ------------------------------ #
+# -------------------------------------------------------------------------- #
 
 @dataclass(frozen=True)
 class WorkItem:
@@ -53,13 +62,32 @@ class DeviceSlot:
     """A logical worker slot bound to a CPU or CUDA device string."""
     device: str
 
+
 # -------------------------------------------------------------------------- #
 # ------------------------------ public entry ------------------------------ #
 # -------------------------------------------------------------------------- #
 
-def run_parallel(config: InitScaleConfig):
+def run_parallel(config: TrainingStatsConfig):
+    """Run the training-stats experiment through the shared parallel scheduler."""
+    return run_parallel_with_outputs(
+        config,
+        rows_filename="_training_stats_rows.csv",
+        summarize_fn=summarize_training_stats_rows,
+        plot_fn=plot_training_summaries,
+        include_init_data_variability=False,
+    )
+
+
+def run_parallel_with_outputs(
+    config: Any,
+    rows_filename: str,
+    summarize_fn: Callable[[Sequence[Mapping[str, Any]], Sequence[str]], List[Dict[str, Any]]],
+    plot_fn: Callable[..., Dict[str, Path]],
+    include_init_data_variability: bool,
+):
     """
-    Main function.
+    Shared parent-process parallel runner.
+
     The parent process builds work items, chooses device slots, aggregates
     rows, and writes outputs. Dataset loading and metric computation happen
     inside worker processes.
@@ -82,26 +110,33 @@ def run_parallel(config: InitScaleConfig):
 
     # Aggregate in a deterministic order so parallel and serial CSVs are comparable.
     rows = sort_rows(rows)
-    summary_rows = summarize_rows(rows, config.tracked_metrics or [], report_data_seed=config.report_data_seed)
-    data_averaged_init_variability_rows = summarize_data_averaged_init_variability_rows(rows, config.tracked_metrics or [])
-    init_averaged_data_variability_rows = summarize_init_averaged_data_variability_rows(rows, config.tracked_metrics or [])
+    summary_rows = summarize_fn(rows, config.tracked_metrics or [])
+    data_averaged_init_variability_rows = None
+    init_averaged_data_variability_rows = None
+    if include_init_data_variability:
+        data_averaged_init_variability_rows = summarize_data_averaged_init_variability_rows(rows, config.tracked_metrics or [])
+        init_averaged_data_variability_rows = summarize_init_averaged_data_variability_rows(rows, config.tracked_metrics or [])
 
     # File writing and plotting
-    config.output_dir.mkdir(parents=True, exist_ok=True)
-    paths = {
-        "rows": config.output_dir / "_init_scale_rows.csv",
-    }
-    _remove_stale_summary_csv(config.output_dir)
-    write_csv(paths["rows"], rows)
-    paths.update(
-        plot_summaries(
-            summary_rows,
-            config,
-            config.output_dir,
-            data_averaged_init_variability_rows=data_averaged_init_variability_rows,
-            init_averaged_data_variability_rows=init_averaged_data_variability_rows,
+    paths = write_rows_output(config.output_dir, rows_filename, rows)
+    if include_init_data_variability:
+        paths.update(
+            plot_fn(
+                summary_rows,
+                config,
+                config.output_dir,
+                data_averaged_init_variability_rows=data_averaged_init_variability_rows,
+                init_averaged_data_variability_rows=init_averaged_data_variability_rows,
+            )
         )
-    )
+    else:
+        paths.update(
+            plot_fn(
+                summary_rows,
+                config,
+                config.output_dir,
+            )
+        )
     return rows, summary_rows, paths
 
 # -------------------------------------------------------------------------- #
@@ -113,7 +148,7 @@ def _chunks(values: Sequence[int], chunk_size: int) -> Iterable[Sequence[int]]:
     for start in range(0, len(values), chunk_size):
         yield values[start:start + chunk_size]
 
-def _build_work_items(config: InitScaleConfig) -> List[WorkItem]:
+def _build_work_items(config: Any) -> List[WorkItem]:
     """
     Create init-seed chunks for every point in the configured sweep grid.
     A WorkItem keeps `(n, data_seed, anisotropy, m, alpha, beta)` and groups several init seeds.
@@ -143,7 +178,7 @@ def _build_work_items(config: InitScaleConfig) -> List[WorkItem]:
     return items
 
 
-def _sort_work_items_by_estimated_cost(config: InitScaleConfig, items: Sequence[WorkItem]) -> List[WorkItem]:
+def _sort_work_items_by_estimated_cost(config: Any, items: Sequence[WorkItem]) -> List[WorkItem]:
     """Run larger estimated-memory jobs first to reduce the slow-job tail."""
     return sorted(items, key=lambda item: _static_memory_estimate_mb(config, item), reverse=True)
 
@@ -152,19 +187,20 @@ def _sort_work_items_by_estimated_cost(config: InitScaleConfig, items: Sequence[
 # -------------------------------------------------------------------------- #
 
 def _resolve_base_device(device: str) -> str:
-    "Decide whether to use the CPU path or CUDA path."
+    """Decide whether to use the CPU path or CUDA path."""
     if device == "auto":
         return "cuda" if torch.cuda.is_available() else "cpu"
     if device.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError(f"Requested device {device!r}, but CUDA is unavailable.")
     return "cuda" if device.startswith("cuda") else "cpu"
 
-def _cpu_slots(config: InitScaleConfig, items: Sequence[WorkItem]) -> List[DeviceSlot]:
+def _cpu_slots(config: Any, items: Sequence[WorkItem]) -> List[DeviceSlot]:
+    """Return CPU worker slots using the current shared worker cap."""
     # Reuse max_workers_per_gpu as the CPU worker cap; there is no CPU-specific knob yet.
     count = min(len(items), max(1, config.max_workers_per_gpu))
     return [DeviceSlot("cpu") for _ in range(max(1, count))]
 
-def _cuda_slots(config: InitScaleConfig, items: Sequence[WorkItem], device: str) -> List[DeviceSlot]:
+def _cuda_slots(config: Any, items: Sequence[WorkItem], device: str) -> List[DeviceSlot]:
     """
     Create CUDA worker slots from selected GPUs and estimated memory budget.
     With adaptive packing, each GPU gets roughly
@@ -174,7 +210,7 @@ def _cuda_slots(config: InitScaleConfig, items: Sequence[WorkItem], device: str)
     """
     gpu_ids = _gpu_ids(config, device)
     if not gpu_ids:
-        raise RuntimeError("No CUDA GPUs were selected for the parallel init-scale experiment.")
+        raise RuntimeError("No CUDA GPUs were selected for the parallel sweep experiment.")
 
     if not config.adaptive_gpu_packing:
         per_gpu = {idx: config.max_workers_per_gpu for idx in gpu_ids}
@@ -204,7 +240,8 @@ def _round_robin_cuda_slots(
         for device in round_robin_device_names(per_gpu, ordered_devices=gpu_ids)
     ]
 
-def _gpu_ids(config: InitScaleConfig, device: str) -> List[int]:
+def _gpu_ids(config: Any, device: str) -> List[int]:
+    """Return selected CUDA device indices from config or the device string."""
     if config.gpu_ids is not None:
         return list(config.gpu_ids)
     if ":" in config.device:
@@ -215,13 +252,13 @@ def _gpu_ids(config: InitScaleConfig, device: str) -> List[int]:
 # -------------------------- memory and profiling -------------------------- #
 # -------------------------------------------------------------------------- #
 
-def _profile_items(config: InitScaleConfig, items: Sequence[WorkItem], device: str) -> List[WorkItem]:
-    "Calibrate one representative per shape to see which batch sizes actually run ok."
+def _profile_items(config: Any, items: Sequence[WorkItem], device: str) -> List[WorkItem]:
+    """Calibrate one representative per shape to find working batch sizes."""
     if not config.adaptive_gpu_packing or not items:
         return list(items)
 
     start_time = time.monotonic()
-    print(f"Profiling starts...")
+    print("Profiling starts...")
     representatives: Dict[Tuple[int, int], WorkItem] = {}
     for item in items:
         if item.profile_fields not in representatives:
@@ -230,7 +267,10 @@ def _profile_items(config: InitScaleConfig, items: Sequence[WorkItem], device: s
     profile_items = list(representatives.values())
     profile_slots = _cuda_slots(config, profile_items, device)
 
-    profile_step_values = [0] if max(config.training_step_values) <= 0 else [0, 1]
+    if len(config.training_step_values) <= 1:
+        profile_step_values = list(config.training_step_values)
+    else:
+        profile_step_values = [0] if max(config.training_step_values) <= 0 else [0, 1]
     profile_config = replace(config, training_step_values=profile_step_values)
     profile_batches: Dict[Tuple[int, int], Tuple[int, int]] = {}
     for item, result in _run_profile_items(profile_config, profile_items, profile_slots):
@@ -251,15 +291,15 @@ def _profile_items(config: InitScaleConfig, items: Sequence[WorkItem], device: s
         for item in items
     ]
 
-def _gpu_memory_budget_mb(config: InitScaleConfig, gpu_idx: int) -> float:
-    "Estimate usable free GPU memory after safety and reservation margins."
+def _gpu_memory_budget_mb(config: Any, gpu_idx: int) -> float:
+    """Estimate usable free GPU memory after safety and reservation margins."""
     free_mb = None
 
     # try obtaining the amount of free memory by running nvidia-smi
     out = None
     try:
         out = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=index,memory.free", "--format=csv,noheader,nounits",],
+            ["nvidia-smi", "--query-gpu=index,memory.free", "--format=csv,noheader,nounits"],
             encoding="utf-8",
             stderr=subprocess.DEVNULL,
         )
@@ -297,7 +337,7 @@ def _print_slots(label: str, slots: Sequence[DeviceSlot]) -> None:
         flush=True,
     )
 
-def _static_memory_estimate_mb(config: InitScaleConfig, item: WorkItem) -> float:
+def _static_memory_estimate_mb(config: Any, item: WorkItem) -> float:
     """
     Conservatively approximate one worker process's peak tensor memory.
     This estimates the live tensors for one work item on one device: the
@@ -322,10 +362,10 @@ def _static_memory_estimate_mb(config: InitScaleConfig, item: WorkItem) -> float
     hvp_graph_bytes = 0
     hvp_param_bytes = 0
     tracked_metrics = tuple(config.tracked_metrics or [])
-    if any(_is_ntk_matrix_metric_name(name) for name in tracked_metrics):
+    if any(ntk_metric_needs_matrix(name) for name in tracked_metrics):
         spectral_hidden_bytes = 2 * item.n * item.m * dtype_bytes
         spectral_ntk_bytes = item.n * item.n * dtype_bytes
-    if any(_is_ntk_hvp_metric_name(name) for name in tracked_metrics):
+    if any(ntk_metric_needs_hvp(name) for name in tracked_metrics):
         hvp_graph_bytes = item.n * item.m * dtype_bytes
         hvp_param_bytes = model_bytes
 
@@ -340,20 +380,12 @@ def _static_memory_estimate_mb(config: InitScaleConfig, item: WorkItem) -> float
         + 8 * hvp_graph_bytes
     ) / MB + 512.0
 
-
-def _is_ntk_matrix_metric_name(name: str) -> bool:
-    return ntk_metric_needs_matrix(name)
-
-
-def _is_ntk_hvp_metric_name(name: str) -> bool:
-    return ntk_metric_needs_hvp(name)
-
 # -------------------------------------------------------------------------- #
 # -------------------------- scheduling & tracking ------------------------- #
 # -------------------------------------------------------------------------- #
 
 def _run_items(
-    config: InitScaleConfig,
+    config: Any,
     items: Sequence[WorkItem],
     slots: Sequence[DeviceSlot],
 ) -> List[Dict[str, Any]]:
@@ -364,7 +396,7 @@ def _run_items(
     return rows
 
 def _run_profile_items(
-    config: InitScaleConfig,
+    config: Any,
     items: Sequence[WorkItem],
     slots: Sequence[DeviceSlot],
 ) -> List[Tuple[WorkItem, Mapping[str, Any]]]:
@@ -377,7 +409,7 @@ def _run_profile_items(
     return list(_run_scheduled_items(config, items, slots, phase="profiling"))
 
 def _run_scheduled_items(
-    config: InitScaleConfig,
+    config: Any,
     items: Sequence[WorkItem],
     slots: Sequence[DeviceSlot],
     phase: str,
@@ -443,7 +475,7 @@ def _run_scheduled_items(
 def _submit_to_pool(
     pool: ProcessPoolExecutor,
     futures: Dict[Any, Tuple[WorkItem, DeviceSlot]],
-    config: InitScaleConfig,
+    config: Any,
     item: WorkItem,
     slot: DeviceSlot,
     tracker: "_RunTracker",
@@ -489,6 +521,7 @@ class _RunTracker:
         enabled: bool,
         interval_seconds: Optional[float] = None,
     ):
+        """Initialize counters and active-slot state for grid-level logging."""
         self.phase = phase
         self.enabled = bool(enabled)
         self.interval_seconds = None if interval_seconds is None else float(interval_seconds)
@@ -529,7 +562,7 @@ class _RunTracker:
         now = time.monotonic()
         key = _grid_key(item)
         self.done_by_grid[key] += 1
-        _, _, submitted_at = self.active.pop(_item_key(item), (item, "", now))
+        self.active.pop(_item_key(item), None)
         grid_done = self.done_by_grid[key]
         grid_total = self.total_by_grid[key]
         if grid_done == grid_total:
@@ -538,8 +571,6 @@ class _RunTracker:
                 f"tuple={self.grid_index[key]:>3}/{self.num_grids:<3} "
                 f"chunks={grid_done:>2}/{grid_total:<2} total_done={completed}/{self.total_chunks} "
                 f"tuple_elapsed={_format_duration(now - self.grid_started_at.get(key, now))} ",
-                # f"last_chunk={_format_duration(now - submitted_at)} "
-                # f"elapsed={_format_duration(now - self.start_time)}",
                 flush=True,
             )
         self.maybe_snapshot(now)
@@ -630,6 +661,7 @@ class _ProgressPrinter:
     """Parent-process progress printer shared by profiling and work schedulers."""
 
     def __init__(self, label: str, total: int, interval_seconds: Optional[float] = None):
+        """Initialize summary progress logging state."""
         self.label = label
         self.total = int(total)
         self.interval_seconds = None if interval_seconds is None else float(interval_seconds)
@@ -668,8 +700,8 @@ class _ProgressPrinter:
 # --------------------------- worker execution ----------------------------- #
 # -------------------------------------------------------------------------- #
 
-def _run_item_with_retries(config: InitScaleConfig, item: WorkItem, device: str) -> Dict[str, Any]:
-    "Run one item, shrinking batch sizes after CUDA OOM when enabled."
+def _run_item_with_retries(config: Any, item: WorkItem, device: str) -> Dict[str, Any]:
+    """Run one item, shrinking batch sizes after CUDA OOM when enabled."""
     current = item
     while True:
         result = _run_one_item(config, current, device)
@@ -681,7 +713,7 @@ def _run_item_with_retries(config: InitScaleConfig, item: WorkItem, device: str)
             return result
         current = retry
 
-def _run_one_item(config: InitScaleConfig, item: WorkItem, device: str) -> Dict[str, Any]:
+def _run_one_item(config: Any, item: WorkItem, device: str) -> Dict[str, Any]:
     """
     Load data on one device and evaluate every init seed in the work item.
     data_seed is used here; init_seeds each produce one trajectory over the
@@ -693,29 +725,15 @@ def _run_one_item(config: InitScaleConfig, item: WorkItem, device: str) -> Dict[
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
 
-        worker_config = \
-            replace(
-                config,
-                synthetic_anisotropy_power=item.synthetic_anisotropy_power,
-                batch_size=item.batch_size,
-                jacobian_batch_size=item.jacobian_batch_size,
-                parallel=False,
-            )
-
-        data = load_binary_classification_data(
-            dataset=worker_config.dataset,
-            n=item.n,
-            negative_classes=worker_config.negative_classes,
-            positive_classes=worker_config.positive_classes,
-            random_labels=worker_config.random_labels,
-            device=device,
-            seed=item.data_seed,
-            reserve_last=worker_config.reserve_last,
-            synthetic_d_in=worker_config.synthetic_d_in,
-            synthetic_test_size=worker_config.synthetic_test_size,
-            synthetic_projection_fraction=worker_config.synthetic_projection_fraction,
-            synthetic_anisotropy_power=worker_config.synthetic_anisotropy_power,
+        worker_config = replace(
+            config,
+            synthetic_anisotropy_power=item.synthetic_anisotropy_power,
+            batch_size=item.batch_size,
+            jacobian_batch_size=item.jacobian_batch_size,
+            parallel=False,
         )
+
+        data = load_sweep_data(worker_config, n=item.n, data_seed=item.data_seed, device=device)
 
         rows = []
         for init_seed in item.init_seeds:
@@ -752,7 +770,9 @@ def _run_one_item(config: InitScaleConfig, item: WorkItem, device: str) -> Dict[
     except Exception as exc:
         return {"ok": False, "oom": False, "error": str(exc)}
 
-def _shrink_after_oom(item: WorkItem, config: InitScaleConfig) -> WorkItem:
+
+def _shrink_after_oom(item: WorkItem, config: Any) -> WorkItem:
+    """Prefer shrinking Jacobian batches, then ordinary batches, after OOM."""
     new_jac = _shrunk(item.jacobian_batch_size, config)
     if new_jac < item.jacobian_batch_size:
         return replace(item, jacobian_batch_size=new_jac)
@@ -761,17 +781,20 @@ def _shrink_after_oom(item: WorkItem, config: InitScaleConfig) -> WorkItem:
         return replace(item, batch_size=new_batch)
     return item
 
-def _shrunk(value: int, config: InitScaleConfig) -> int:
+
+def _shrunk(value: int, config: Any) -> int:
     """Shrink a batch size by the configured OOM factor without crossing minimum."""
     if value <= config.min_batch_size:
         return value
     return max(config.min_batch_size, int(math.floor(value * config.oom_shrink_factor)))
 
+
 def _checked_worker_result(result: Mapping[str, Any], item: WorkItem) -> List[Dict[str, Any]]:
+    """Return worker rows or raise a contextual parent-process error."""
     if result.get("ok"):
         return list(result["rows"])
     raise RuntimeError(
-        "Init-scale worker failed for "
+        "Sweep worker failed for "
         f"n={item.n}, data_seed={item.data_seed}, m={item.m}, "
         f"anisotropy={item.synthetic_anisotropy_power}, alpha={item.alpha}, "
         f"beta={item.beta}, init_seeds={list(item.init_seeds)}: "

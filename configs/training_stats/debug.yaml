@@ -6,17 +6,18 @@ experiment:
 
   # n_values: [32000]
   # m_values: [128, 512, 1024]
-  n_values: [1000]
+  n_values: [500, 1000]
   m_values: [64, 128]
   init_type: standard
-  beta_values: [inf, 250]
-  training_step_values: [0]
-  eta: 0.001
-  init_type: standard
 
-  num_data_seeds: 4
-  data_seed_start: 0
-  num_inits: 4
+  # beta_values: [inf]
+  # training_step_values: [0, 10000, 20000, 40000, 80000, 120000, 160000, 240000, 320000, 640000, 1000000]
+  beta_values: [inf, 250]
+  training_step_values: [0, 5, 25, 125]
+  eta: 0.001
+
+  data_seed: 0
+  num_inits: 1
   init_seed_start: 0
 
   device: cuda
@@ -24,13 +25,13 @@ experiment:
   gpu_ids: [6,7]
   adaptive_gpu_packing: true
   gpu_memory_safety_fraction: 0.9
-  max_workers_per_gpu: 4
-  batch_size: 1024
-  jacobian_batch_size: 1024
-  init_chunk_size: 4
+  max_workers_per_gpu: 1
+  batch_size: 8192
+  jacobian_batch_size: 4096
+  init_chunk_size: 1
 
-  progress_interval_seconds: 300
-  progress_detail: summary
+  progress_interval_seconds: 600
+  progress_detail: grid
 
   tracked_metrics:
     - empirical_loss
@@ -46,7 +47,7 @@ experiment:
     - ntk_eig_min
     - ntk_eig_mean
     - ntk_eig_max
-    
+
     - residual_ntk_alignment
     - residual_initial_ntk_alignment
     - residual_ntk_alignment_over_initial
@@ -74,7 +75,7 @@ experiment:
     - ntk_eig_min
     - ntk_eig_mean
     - ntk_eig_max
-    
+
     - residual_ntk_alignment
     - residual_ntk_alignment_over_initial
     - residual_ntk_alignment_trace_normalized_over_initial
@@ -89,4 +90,4 @@ experiment:
   plot_format: combined
   plot_heatmaps: false
 
-  output_dir: plots/init_scale/debug_ntk_nm_mnist
+  output_dir: plots/training_stats/debug

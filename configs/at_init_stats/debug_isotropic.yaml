@@ -10,7 +10,7 @@ experiment:
   n_values: [4000, 8000, 16000]
   m_values: [4000, 8000, 16000]
   # beta_values: [inf]
-  # training_step_values: [0]
+  # training_step: 0
   # eta: 0.001
   init_type: standard
 
@@ -20,8 +20,6 @@ experiment:
   init_seeds: null
   num_inits: 50
   init_seed_start: 10000
-  # report_data_seed: 0
-
   device: cuda
   batch_size: 10000
   jacobian_batch_size: 1000
@@ -54,4 +52,4 @@ experiment:
   plot_format: combined  # combined | individual | both
   plot_heatmaps: false
 
-  output_dir: plots/init_scale/m_sweep_rand_labels
+  output_dir: plots/at_init_stats/m_sweep_rand_labels

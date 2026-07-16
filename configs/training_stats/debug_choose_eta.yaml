@@ -12,8 +12,7 @@ experiment:
   training_step_values: [0, 5000, 10000, 20000, 40000, 80000, 160000, 320000]
   eta: 0.0010
 
-  num_data_seeds: 1
-  data_seed_start: 0
+  data_seed: 0
   num_inits: 3
   init_seed_start: 0
 
@@ -36,7 +35,7 @@ experiment:
 
     - ntk_eig_min
     - ntk_eig_max
-    
+
     - residual_ntk_alignment_trace_normalized_over_initial
 
     - task_ntk_alignment_trace_normalized_over_initial
@@ -50,7 +49,7 @@ experiment:
 
     - ntk_eig_min
     - ntk_eig_max
-    
+
     - residual_ntk_alignment_trace_normalized_over_initial
 
     - task_ntk_alignment_trace_normalized_over_initial
@@ -61,4 +60,4 @@ experiment:
   plot_format: combined
   plot_heatmaps: false
 
-  output_dir: plots/init_scale/debug_eta_1e-3
+  output_dir: plots/training_stats/debug_eta_1e-3

@@ -13,8 +13,7 @@ experiment:
   eta: 0.0005
   init_type: standard
 
-  num_data_seeds: 4
-  data_seed_start: 0
+  data_seed: 0
   num_inits: 16
   init_seed_start: 0
 
@@ -96,4 +95,4 @@ experiment:
   plot_format: combined
   plot_heatmaps: false
 
-  output_dir: plots/init_scale/ntk_energy_mnist_time_true_y
+  output_dir: plots/training_stats/ntk_energy_mnist_time_true_y

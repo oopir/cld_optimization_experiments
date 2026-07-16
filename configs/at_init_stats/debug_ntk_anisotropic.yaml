@@ -7,7 +7,7 @@ experiment:
   n_values: [1024, 2048, 4096, 8192]
   m_values: [8192]
   # beta_values: [inf]
-  # training_step_values: [0]
+  # training_step: 0
   eta: 0.005
   init_type: standard
 
@@ -56,4 +56,4 @@ experiment:
   plot_format: combined
   plot_heatmaps: false
 
-  output_dir: plots/init_scale/debug_ntk_anisotropy
+  output_dir: plots/at_init_stats/debug_ntk_anisotropy

@@ -12,8 +12,7 @@ experiment:
   training_step_values: [0, 10000, 20000, 40000, 80000, 120000, 160000, 240000, 320000]
   eta: 0.0005
 
-  num_data_seeds: 3
-  data_seed_start: 0
+  data_seed: 0
   num_inits: 3
   init_seed_start: 0
 
@@ -41,4 +40,4 @@ experiment:
   plot_format: combined
   plot_heatmaps: false
 
-  output_dir: plots/init_scale/medium-scale-320000-steps
+  output_dir: plots/training_stats/medium-scale-320000-steps

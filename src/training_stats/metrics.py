@@ -4,6 +4,10 @@ from typing import Dict, Optional, Sequence, Tuple
 import torch
 
 
+# -------------------------------------------------------------------------- #
+# ------------------------------- constants -------------------------------- #
+# -------------------------------------------------------------------------- #
+
 CORE_METRICS = (
     "mean_abs_output",
     "mean_preactivation_norm",
@@ -20,10 +24,6 @@ FORWARD_METRICS = (
     "mean_preactivation_norm_normalized",
     "mean_abs_residual",
     "empirical_loss",
-)
-
-TEST_METRICS = (
-    "test_error",
 )
 
 CLASSIFICATION_ERROR_METRICS = (
@@ -138,15 +138,22 @@ ALL_METRICS = DEFAULT_METRICS + CLASSIFICATION_ERROR_METRICS + NTK_STATIC_METRIC
 GRADIENT_METRICS = OUTPUT_GRAD_METRICS + EMPIRICAL_LOSS_GRAD_METRICS
 
 
+# -------------------------------------------------------------------------- #
+# --------------------------- metric name helpers -------------------------- #
+# -------------------------------------------------------------------------- #
+
 def append_k_to_ntk_label_energy_metric(k: int) -> str:
+    """Return the configured top-k label-energy metric name."""
     return f"{NTK_LABEL_ENERGY_PREFIX}{int(k)}"
 
 
 def append_k_to_ntk_residual_energy_metric(k: int) -> str:
+    """Return the configured top-k residual-energy metric name."""
     return f"{NTK_RESIDUAL_ENERGY_PREFIX}{int(k)}"
 
 
 def _parse_positive_int_suffix(name: str, prefix: str) -> Optional[int]:
+    """Parse a positive integer suffix after a fixed metric-name prefix."""
     if not name.startswith(prefix):
         return None
     suffix = name[len(prefix):]
@@ -157,47 +164,57 @@ def _parse_positive_int_suffix(name: str, prefix: str) -> Optional[int]:
 
 
 def parse_ntk_label_energy_metric(name: str) -> Optional[int]:
+    """Return k when name is a top-k NTK label-energy metric."""
     return _parse_positive_int_suffix(name, NTK_LABEL_ENERGY_PREFIX)
 
 
 def parse_ntk_residual_energy_metric(name: str) -> Optional[int]:
+    """Return k when name is a top-k NTK residual-energy metric."""
     return _parse_positive_int_suffix(name, NTK_RESIDUAL_ENERGY_PREFIX)
 
 
 def parse_ntk_energy_metric(name: str) -> Optional[int]:
+    """Return k when name is any configured top-k NTK energy metric."""
     label_k = parse_ntk_label_energy_metric(name)
     return label_k if label_k is not None else parse_ntk_residual_energy_metric(name)
 
 
 def is_ntk_metric(name: str) -> bool:
+    """Return whether a metric name belongs to the NTK metric family."""
     return name in NTK_STATIC_METRICS or parse_ntk_energy_metric(name) is not None
 
 
 def ntk_metric_needs_matrix(name: str) -> bool:
+    """Return whether a metric requires the current full NTK matrix."""
     return name in NTK_MATRIX_METRICS or ntk_metric_needs_initial_matrix(name) or parse_ntk_energy_metric(name) is not None
 
 
 def ntk_metric_needs_initial_matrix(name: str) -> bool:
+    """Return whether a metric compares against the initialization NTK."""
     return name in NTK_INITIAL_MATRIX_METRICS
 
 
 def ntk_metric_needs_hvp(name: str) -> bool:
+    """Return whether a metric needs a Hessian-vector product graph."""
     return name in NTK_HVP_METRICS
 
 
-def is_ntk_loss_weighted_average_metric(name: str) -> bool:
-    return name in NTK_LOSS_WEIGHTED_AVERAGE_METRICS
-
-
 def ntk_loss_weighted_average_dependencies(name: str) -> Optional[Tuple[str, ...]]:
+    """Return raw metric dependencies for a loss-weighted average alias."""
     return NTK_LOSS_WEIGHTED_AVERAGE_DEPENDENCIES.get(name)
 
 
 def ntk_loss_weighted_average_base_metric(name: str) -> Optional[str]:
+    """Return the non-loss-weighted metric paired with an average alias."""
     return NTK_LOSS_WEIGHTED_AVERAGE_BASE_METRICS.get(name)
 
 
+# -------------------------------------------------------------------------- #
+# ---------------------------- tensor primitives --------------------------- #
+# -------------------------------------------------------------------------- #
+
 def _output_scale(model) -> float:
+    """Return the scalar-output factor implied by the model init convention."""
     return 1.0 / float(model.alpha) if model.init_type == "alpha" and model.alpha != 0 else 1.0
 
 
@@ -208,12 +225,14 @@ def _activation_and_derivative(z: torch.Tensor) -> Tuple[torch.Tensor, torch.Ten
 
 
 def _safe_ratio(numerator: torch.Tensor, denominator: torch.Tensor) -> float:
+    """Return a tensor ratio as a float, using NaN for zero denominators."""
     if float(denominator.detach().item()) == 0.0:
         return float("nan")
     return float((numerator / denominator).detach().item())
 
 
 def _metric_or_nan(value: Optional[torch.Tensor]) -> float:
+    """Convert an optional scalar tensor to a float metric value."""
     return float("nan") if value is None else float(value.detach().item())
 
 
@@ -231,6 +250,10 @@ def _hidden_forward(
     residual = None if y is None else out - y.view(-1)
     return h, out, activation_derivative, residual
 
+
+# -------------------------------------------------------------------------- #
+# ----------------------- forward and output metrics ----------------------- #
+# -------------------------------------------------------------------------- #
 
 @torch.no_grad()
 def _compute_forward_metrics(
@@ -321,6 +344,10 @@ def _compute_classification_error_metrics(
     return metrics
 
 
+# -------------------------------------------------------------------------- #
+# ----------------------- parameter and gradient metrics ------------------- #
+# -------------------------------------------------------------------------- #
+
 @torch.no_grad()
 def _compute_parameter_metrics(
     model,
@@ -350,6 +377,7 @@ def _compute_parameter_metrics(
     if "fc2_weight_euclidean_norm" in metric_names:
         out["fc2_weight_euclidean_norm"] = float(torch.linalg.vector_norm(W2).item())
     return out
+
 
 # TODO: Simplify this control flow when revisiting the gradient metrics.
 @torch.no_grad()
@@ -441,6 +469,10 @@ def _compute_gradient_metrics(
     return out
 
 
+# -------------------------------------------------------------------------- #
+# ------------------------------ NTK helpers ------------------------------- #
+# -------------------------------------------------------------------------- #
+
 @torch.no_grad()
 def _compute_ntk_matrix(
     model,
@@ -474,6 +506,7 @@ def _compute_ntk_matrix(
 
 
 def _dot_param_lists(left: Sequence[torch.Tensor], right: Sequence[torch.Tensor]) -> torch.Tensor:
+    """Return the inner product of two equally shaped parameter lists."""
     total = None
     for a, b in zip(left, right):
         term = (a * b).sum()
@@ -484,6 +517,7 @@ def _dot_param_lists(left: Sequence[torch.Tensor], right: Sequence[torch.Tensor]
 
 
 def _sorted_median(values: torch.Tensor) -> torch.Tensor:
+    """Return the median of a pre-sorted tensor."""
     n = int(values.numel())
     if n == 0:
         return torch.tensor(float("nan"), device=values.device, dtype=values.dtype)
@@ -574,6 +608,7 @@ def _trace_normalized_alignment_ratio(
     initial_alignment: Optional[torch.Tensor],
     initial_trace: torch.Tensor,
 ) -> float:
+    """Return the ratio of trace-normalized current and initial alignments."""
     if current_alignment is None or current_trace is None or initial_alignment is None:
         return float("nan")
     if float(current_trace.detach().item()) <= 0.0 or float(initial_trace.detach().item()) <= 0.0:
@@ -582,6 +617,7 @@ def _trace_normalized_alignment_ratio(
 
 
 def _check_initial_ntk_matrix(initial_ntk_matrix: torch.Tensor, K_shape: Tuple[int, int], device, dtype) -> torch.Tensor:
+    """Validate and move an externally supplied initialization NTK matrix."""
     if initial_ntk_matrix.shape != K_shape:
         raise ValueError(
             "initial_ntk_matrix must have shape "
@@ -590,11 +626,8 @@ def _check_initial_ntk_matrix(initial_ntk_matrix: torch.Tensor, K_shape: Tuple[i
     return initial_ntk_matrix.to(device=device, dtype=dtype)
 
 
-def _needs_ntk_matrix(metric_set: set, label_energy_ks: Sequence[int]) -> bool:
-    return bool(label_energy_ks) or any(ntk_metric_needs_matrix(name) for name in metric_set)
-
-
 def _needs_current_ntk_matrix(metric_set: set, label_energy_ks: Sequence[int]) -> bool:
+    """Return whether the requested NTK metrics need the current matrix."""
     return bool(label_energy_ks) or any(name in NTK_MATRIX_METRICS for name in metric_set)
 
 
@@ -780,6 +813,10 @@ def _compute_ntk_metrics(
     return metrics
 
 
+# -------------------------------------------------------------------------- #
+# ---------------------------- public dispatcher --------------------------- #
+# -------------------------------------------------------------------------- #
+
 def get_metrics(
     model,
     X: torch.Tensor,
@@ -791,7 +828,7 @@ def get_metrics(
     y_test: Optional[torch.Tensor] = None,
     initial_ntk_matrix: Optional[torch.Tensor] = None,
 ) -> Dict[str, float]:
-    """Compute the requested init-scale metrics."""
+    """Compute the requested scalar metrics."""
     metric_names = list(metric_names)
     forward_metrics = [name for name in metric_names if name in FORWARD_METRICS]
     classification_error_metrics = [name for name in metric_names if name in CLASSIFICATION_ERROR_METRICS]
