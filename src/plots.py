@@ -263,8 +263,8 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
             ax.set_ylim(-0.05, 0.7)
         if k in log_axes:
             ax.set_yscale("log")
-            if k == "feat_gram_lambda":
-                ax.set_ylim(1.0e4, 2.2e4)
+            # if k == "feat_gram_lambda":
+                # ax.set_ylim(1.0e4, 2.2e4)
             scale = 1e4
             fmt = mticker.FuncFormatter(lambda y, _: f"{y / scale:g}")
             ax.yaxis.set_major_formatter(fmt)

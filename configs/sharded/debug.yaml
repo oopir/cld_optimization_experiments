@@ -1,0 +1,32 @@
+experiment:
+  seeds: [0]
+  n: 10
+  random_labels: false
+  betas: [500]
+  epochs: 100
+  eta: 1.0e-5
+  m: 50000
+  L: 3
+  activation: tanh
+  dataset: digits
+  init_type: standard
+  use_linearized: true
+  same_noise: true
+  track_jacobian: true
+  tracked_metrics:
+    - train_loss
+    - feat_gram_lambda
+    - lin_train_loss
+    - lin_param_dist
+    - nn_lin_param_dist
+    - jacobian_dist
+  jac_probe_size: 1
+  device: cuda
+  gpu_indices: [4, 5, 6, 7]
+  track_every: 10
+  print_every: 100
+  checkpoint_state: metrics_only
+
+run:
+  ckpt_dir: "~/cld_optimization_experiments/cld_checkpoints"
+  save_ckpt: true

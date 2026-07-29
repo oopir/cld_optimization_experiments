@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse, math, os, sys
 from pathlib import Path
+from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if Path.cwd().resolve() != REPO_ROOT:
@@ -16,10 +17,37 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import matplotlib.ticker as mticker
 import numpy as np
+import torch
 
-from src.config import load_checkpoint
+from src.config import patch_loaded_config
 
 DISTANCE_COMPONENTS = {"l2": 0, "cosine": 1}
+
+
+def _checkpoint_payload_path(path):
+    path = Path(path).expanduser()
+    if path.is_dir():
+        return path / "results.pt"
+    return path
+
+
+def load_supported_checkpoint(path):
+    payload_path = _checkpoint_payload_path(path)
+    payload = torch.load(payload_path, map_location="cpu", weights_only=False)
+    if not isinstance(payload, dict):
+        raise ValueError(f"{payload_path}: checkpoint payload is not a dict.")
+
+    payload_type = payload.get("type", "exp1")
+    if payload_type == "sharded_exp1":
+        config = payload.get("config")
+        if config is None:
+            config = SimpleNamespace(**payload["config_dict"])
+        return payload["results"], config
+
+    if payload_type == "exp1":
+        return payload["results"], patch_loaded_config(payload["config"])
+
+    raise ValueError(f"{payload_path}: unsupported checkpoint type {payload_type!r}.")
 
 
 def metric_history(metrics, metric, distance_type):
@@ -223,7 +251,8 @@ def main():
     p.add_argument("--outdir", default="plots")
     args = p.parse_args()
 
-    results, cfg = load_checkpoint(Path(args.ckpt).expanduser())
+    Path(args.outdir).mkdir(parents=True, exist_ok=True)
+    results, cfg = load_supported_checkpoint(Path(args.ckpt).expanduser())
 
     # Fail before creating figures if the metric is missing or ambiguous.
     found_metric = False
