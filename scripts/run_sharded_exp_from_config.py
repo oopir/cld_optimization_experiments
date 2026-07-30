@@ -28,6 +28,10 @@ from sharded.exp import run_exp
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run sharded heavy dense-network experiments.")
     parser.add_argument("--config", type=Path, required=True, help="Path to YAML config file.")
+    parser.add_argument("--load-ckpt-name", type=Path, default=None, help="Override run.load_ckpt_name.")
+    parser.add_argument("--new-total-epochs", type=int, default=None, help="Override run.new_total_epochs.")
+    parser.add_argument("--no-load-ckpt", action="store_true", help="Ignore config.run.load_ckpt.")
+    parser.add_argument("--resume-from-ckpt", action="store_true", help="Force resume from checkpoint.")
     parser.add_argument("--save-ckpt", action="store_true", help="Force checkpoint saving.")
     return parser.parse_args()
 
@@ -36,6 +40,17 @@ def main() -> None:
     args = parse_args()
     mapping = load_mapping(args.config)
     exp_config, run_opts = build_from_config_mapping(mapping)
+    if args.load_ckpt_name is not None:
+        run_opts.load_ckpt_name = args.load_ckpt_name
+        run_opts.load_ckpt = True
+    if args.new_total_epochs is not None:
+        run_opts.new_total_epochs = args.new_total_epochs
+    if args.resume_from_ckpt:
+        run_opts.resume_from_ckpt = True
+        run_opts.load_ckpt = True
+    if args.no_load_ckpt:
+        run_opts.load_ckpt = False
+        run_opts.resume_from_ckpt = False
     if args.save_ckpt:
         run_opts.save_ckpt = True
 

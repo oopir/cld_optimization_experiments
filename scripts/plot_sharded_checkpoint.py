@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-from types import SimpleNamespace
 import sys
 
 
@@ -19,29 +18,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 os.environ["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
-import torch
-
+from sharded.checkpoint import load_checkpoint_with_metadata
 from src.plots import plot_ex1_multiseed, plot_test_error_vs_alpha
 
 
-def _checkpoint_payload_path(path: Path) -> Path:
-    path = path.expanduser()
-    if path.is_dir():
-        return path / "results.pt"
-    return path
-
-
 def load_sharded_checkpoint(path: Path):
-    payload_path = _checkpoint_payload_path(path)
-    payload = torch.load(payload_path, map_location="cpu", weights_only=False)
-    payload_type = payload.get("type")
-    if payload_type != "sharded_exp1":
-        raise ValueError(f"Expected a sharded_exp1 checkpoint, got {payload_type!r}")
-    results = payload["results"]
-    config = payload.get("config")
-    if config is None:
-        config = SimpleNamespace(**payload["config_dict"])
-    return results, config
+    loaded = load_checkpoint_with_metadata(path)
+    return loaded.results, loaded.config
 
 
 def parse_args() -> argparse.Namespace:
@@ -69,4 +52,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

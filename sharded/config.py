@@ -96,6 +96,11 @@ class ShardedExpConfig:
 class ShardedRunOpts:
     ckpt_dir: Path
     save_ckpt: bool = False
+    load_ckpt: bool = False
+    load_ckpt_name: Optional[Path] = None
+    resume_from_ckpt: bool = False
+    new_total_epochs: Optional[int] = None
+    config_overrides: Optional[list[str]] = None
     plot_output_dir: Path = Path("plots")
 
 
@@ -128,6 +133,7 @@ def build_from_config_mapping(cfg: Mapping) -> tuple[ShardedExpConfig, ShardedRu
     exp_config = ShardedExpConfig(**_prepare_dataclass_kwargs(ShardedExpConfig, exp_kwargs))
 
     _expand_path_arg(run_kwargs, "ckpt_dir")
+    _expand_path_arg(run_kwargs, "load_ckpt_name")
     _expand_path_arg(run_kwargs, "plot_output_dir")
     run_opts = ShardedRunOpts(**_prepare_dataclass_kwargs(ShardedRunOpts, run_kwargs))
     return exp_config, run_opts

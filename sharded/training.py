@@ -8,8 +8,9 @@ import torch
 
 from src.data import load_digits_data, load_mnist_data
 
+from .checkpoint import ShardedResumeState, apply_resume_state_to_model
 from .config import ShardedExpConfig, ShardedMetricPlan, resolve_eta
-from .distributed import DistContext, all_reduce_sum, rank0_print
+from .distributed import DistContext, rank0_print
 from .metrics import loss_fn, record_metrics
 from .model import ShardedMLP
 
@@ -193,6 +194,7 @@ def train_one(
     beta: float,
     seed: int,
     ctx: DistContext,
+    resume_state: ShardedResumeState | None = None,
 ) -> tuple[dict, ShardedMLP]:
     set_reproducible_seed(seed, ctx)
     data = load_data_for_seed(config, seed, ctx.device)
@@ -205,19 +207,27 @@ def train_one(
         alpha=alpha,
         seed=seed,
     ).to(ctx.device)
+
+    epoch_offset = 0
+    if resume_state is not None:
+        apply_resume_state_to_model(model, resume_state)
+        if resume_state.last_epoch is not None:
+            epoch_offset = int(resume_state.last_epoch)
+
     param_norm0_value = model.param_norm0()
     metrics = init_metric_store(metric_plan)
     eta = resolve_eta(config, alpha=alpha, beta=beta)
+    end_epoch = epoch_offset if (resume_state is not None and resume_state.stopped_early) else config.epochs
 
     rank0_print(
         ctx,
         f"training alpha={alpha}, beta={beta}, seed={seed}, "
-        f"L={config.L}, m={config.m}, eta={eta}",
+        f"L={config.L}, m={config.m}, eta={eta}, from epoch={epoch_offset + 1}",
         flush=True,
     )
 
-    last_epoch = 0
-    for epoch in range(1, config.epochs + 1):
+    last_epoch = epoch_offset
+    for epoch in range(epoch_offset + 1, end_epoch + 1):
         last_epoch = epoch
         if _should_record(epoch, config.track_every):
             model.clear_grads("all")
@@ -271,5 +281,7 @@ def train_one(
         )
 
     metrics["last_epoch"] = last_epoch
+    if resume_state is not None and resume_state.stopped_early:
+        metrics["stopped_early"] = True
     model.clear_grads("all")
     return metrics, model

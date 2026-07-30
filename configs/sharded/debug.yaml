@@ -1,11 +1,11 @@
 experiment:
-  seeds: [0]
+  seeds: [0,1]
   n: 10
   random_labels: false
-  betas: [500]
-  epochs: 100
+  betas: [500, .inf]
+  epochs: 1000
   eta: 1.0e-5
-  m: 50000
+  m: 10000
   L: 3
   activation: tanh
   dataset: digits
@@ -20,12 +20,12 @@ experiment:
     - lin_param_dist
     - nn_lin_param_dist
     - jacobian_dist
-  jac_probe_size: 1
+  jac_probe_size: 10
   device: cuda
-  gpu_indices: [4, 5, 6, 7]
-  track_every: 10
-  print_every: 100
-  checkpoint_state: metrics_only
+  # gpu_indices: [4, 5, 6, 7]
+  track_every: 50
+  print_every: 1000
+  checkpoint_state: sharded_state #  metrics_only
 
 run:
   ckpt_dir: "~/cld_optimization_experiments/cld_checkpoints"
