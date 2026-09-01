@@ -1,9 +1,9 @@
 experiment:
-  seeds: [0]
+  seeds: [4]
   n: 10
   random_labels: false
   betas: [100, 500, 1000, .inf]
-  epochs: 100
+  epochs: 4000000
   eta: 1.0e-5
   m: 10000
   L: 3
@@ -22,9 +22,9 @@ experiment:
     - jacobian_dist
   jac_probe_size: 10
   device: cuda
-  # gpu_indices: [4, 5, 6, 7]
-  track_every: 50
-  print_every: 1000
+  gpu_indices: [4]
+  track_every: 50000
+  print_every: 1000000
   checkpoint_state: sharded_state #  metrics_only
 
 run:
