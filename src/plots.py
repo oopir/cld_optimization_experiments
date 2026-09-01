@@ -76,21 +76,58 @@ def _mean_std_tuple_component(results_by_seed, key, component):
     return arr[:, :, component].mean(axis=0), arr[:, :, component].std(axis=0), min_len
 
 
+def _nearest_epoch_index(x, epoch):
+    x = np.asarray(x)
+    return int(np.abs(x - epoch).argmin())
+
+
+def _clip_to_epoch_window(x, *ys, min_epoch=None, max_epoch=None):
+    """Clip plotted arrays to the nearest available requested epoch window."""
+    if min_epoch is None and max_epoch is None:
+        return (x, *ys)
+    x = np.asarray(x)
+    if len(x) == 0:
+        return (x, *ys)
+
+    start = 0 if min_epoch is None else _nearest_epoch_index(x, min_epoch)
+    end = len(x) - 1 if max_epoch is None else _nearest_epoch_index(x, max_epoch)
+    if start > end:
+        return (x[:0], *(y[:0] for y in ys))
+    return (x[start : end + 1], *(y[start : end + 1] for y in ys))
+
+
 def _plot_band(ax, x, mean, std, label, color, lin=False, lw=2.0):
     """Plot a mean history with a seed-std band."""
+    if len(x) == 0:
+        return
     linestyle = "--" if lin else "-"
     ax.plot(x, mean, label=label, color=color, linestyle=linestyle, linewidth=lw)
     ax.fill_between(x, mean - std, mean + std, alpha=0.2, color=color, linewidth=0.0)
 
 
-def _plot_l2_cos_metric(results_by_seed, axes, base_x, key, axis_l2, axis_cos, label, color):
+def _plot_l2_cos_metric(results_by_seed, axes, base_x, key, axis_l2, axis_cos, label, color, min_epoch=None, max_epoch=None):
     """Plot distance histories stored as (L2, cosine), e.g. NTK drift or NN-vs-linearized."""
     l2_mean, l2_std, length = _mean_std_tuple_component(results_by_seed, key, component=0)
-    l2_mean[0] = max(l2_mean[0], 1e-12)
-    _plot_band(axes[axis_l2], base_x[:length], l2_mean, l2_std, label=label, color=color)
+    x, l2_mean, l2_std = _clip_to_epoch_window(
+        base_x[:length],
+        l2_mean,
+        l2_std,
+        min_epoch=min_epoch,
+        max_epoch=max_epoch,
+    )
+    if len(l2_mean):
+        l2_mean[0] = max(l2_mean[0], 1e-12)
+    _plot_band(axes[axis_l2], x, l2_mean, l2_std, label=label, color=color)
 
     co_mean, co_std, length = _mean_std_tuple_component(results_by_seed, key, component=1)
-    _plot_band(axes[axis_cos], base_x[:length], co_mean, co_std, label=label, color=color)
+    x, co_mean, co_std = _clip_to_epoch_window(
+        base_x[:length],
+        co_mean,
+        co_std,
+        min_epoch=min_epoch,
+        max_epoch=max_epoch,
+    )
+    _plot_band(axes[axis_cos], x, co_mean, co_std, label=label, color=color)
     return {axis_l2, axis_cos}
 
 
@@ -138,7 +175,15 @@ def _save_individual_axes(fig, axes, axes_list, plot_output_dir):
         legend.set_visible(legend_was_visible)
 
 
-def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_output_dir="plots"):
+def plot_ex1_multiseed(
+    results,
+    epochs,
+    track_every,
+    use_linearized=True,
+    plot_output_dir="plots",
+    min_epoch=None,
+    max_epoch=None,
+):
     """
     Plot one internally consistent experiment batch.
 
@@ -208,6 +253,8 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
                         axis_cos="jacobian_dist_co",
                         label=run_name,
                         color=c,
+                        min_epoch=min_epoch,
+                        max_epoch=max_epoch,
                     )
                 )
             else:
@@ -225,6 +272,8 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
                         axis_cos="nn_to_lin_dist_co",
                         label=run_name,
                         color=c,
+                        min_epoch=min_epoch,
+                        max_epoch=max_epoch,
                     )
                 )
             else:
@@ -232,7 +281,13 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
 
         if _has_history(run_results_by_seed, "feat_gram_lambda_hist"):
             mean, std, L = _mean_std_across_seeds(run_results_by_seed, "feat_gram_lambda_hist")
-            x = base_x[:L]
+            x, mean, std = _clip_to_epoch_window(
+                base_x[:L],
+                mean,
+                std,
+                min_epoch=min_epoch,
+                max_epoch=max_epoch,
+            )
             _plot_band(axes["feat_gram_lambda"], x, mean, std, label=run_name, color=c)
             plotted_axes.add("feat_gram_lambda")
         else:
@@ -240,7 +295,13 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
 
         if _has_history(run_results_by_seed, "train_loss_hist"):
             mean, std, L = _mean_std_across_seeds(run_results_by_seed, "train_loss_hist")
-            x = base_x[:L]
+            x, mean, std = _clip_to_epoch_window(
+                base_x[:L],
+                mean,
+                std,
+                min_epoch=min_epoch,
+                max_epoch=max_epoch,
+            )
             _plot_band(axes["train_loss"], x, mean, std, label=run_name, color=c, lw=1.5)
             _plot_band(axes["train_loss_with_lin"], x, mean, std, label=run_name, color=c, lw=1.5)
             plotted_axes.update({"train_loss", "train_loss_with_lin"})
@@ -250,7 +311,13 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
         if use_linearized:
             if _has_history(run_results_by_seed, "lin_train_loss_hist"):
                 mean, std, L = _mean_std_across_seeds(run_results_by_seed, "lin_train_loss_hist")
-                x = base_x[:L]
+                x, mean, std = _clip_to_epoch_window(
+                    base_x[:L],
+                    mean,
+                    std,
+                    min_epoch=min_epoch,
+                    max_epoch=max_epoch,
+                )
                 _plot_band(axes["train_loss_with_lin"], x, mean, std, label=f"{run_name} linear", color=c, lin=True, lw=1.5)
                 plotted_axes.add("train_loss_with_lin")
             else:
@@ -303,7 +370,7 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
     fig.savefig(plot_output_dir / "expr1_full.pdf", bbox_inches="tight")
 
 
-def plot_test_error_vs_alpha(results, output_path="alpha_test_error.pdf"):
+def plot_test_error_vs_alpha(results, output_path="alpha_test_error.pdf", track_every=1, min_epoch=None, max_epoch=None):
     """
     Plot final test error by alpha; assumes each plotted run tracks test_acc_hist.
 
@@ -328,11 +395,23 @@ def plot_test_error_vs_alpha(results, output_path="alpha_test_error.pdf"):
             continue
 
         # mean final test error across seeds (1 - test_acc)
+        last_index = None
+        if min_epoch is not None or max_epoch is not None:
+            base_x = _base_epoch_axis(run_results_by_seed, track_every)
+            window_x = _clip_to_epoch_window(base_x, min_epoch=min_epoch, max_epoch=max_epoch)[0]
+            if len(window_x) == 0:
+                continue
+            last_epoch = window_x[-1]
+            last_index = int(np.where(base_x == last_epoch)[0][-1])
+            if last_index < 0:
+                continue
+
         last_accs = []
         for metrics in run_results_by_seed.values():
             hist = metrics.get("test_acc_hist", None)
             if hist is not None and len(hist) > 0:
-                last_accs.append(hist[-1])
+                idx = -1 if last_index is None else min(last_index, len(hist) - 1)
+                last_accs.append(hist[idx])
         if not last_accs:
             continue
 
