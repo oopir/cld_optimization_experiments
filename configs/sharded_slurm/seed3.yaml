@@ -1,0 +1,24 @@
+experiment:
+  seeds: [3]
+  n: 10
+  random_labels: false
+  betas: [100, 500, 1000, .inf]
+  epochs: 150000
+  eta: 1.0e-5
+  m: 10000
+  L: 3
+  activation: tanh
+  dataset: digits
+  init_type: standard
+  use_linearized: true
+  same_noise: true
+  track_jacobian: true
+  tracked_metrics: [train_loss, feat_gram_lambda, lin_train_loss, lin_param_dist, nn_lin_param_dist, jacobian_dist]
+  jac_probe_size: 10
+  device: cuda
+  track_every: 2500
+  print_every: 30000
+  checkpoint_state: sharded_state
+run:
+  ckpt_dir: "cld_checkpoints"
+  save_ckpt: true
