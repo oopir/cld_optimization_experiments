@@ -18,6 +18,11 @@ if str(REPO_ROOT) not in sys.path:
 os.environ["PYTHONPATH"] = str(REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 from src.exp import run_exp, build_from_config_mapping, tune_eta_for_exp
+from src.momentum_comparison import (
+    parse_momentum_comparison_config,
+    plot_momentum_width_comparison,
+    run_momentum_comparison,
+)
 from src.plots import plot_ex1_multiseed, plot_test_error_vs_alpha
 from src.utils import select_idle_gpus_for_experiment
 
@@ -86,6 +91,7 @@ def main():
     mapping = load_mapping(args.config)
 
     exp_config, run_opts = build_from_config_mapping(mapping)
+    momentum_comparison = parse_momentum_comparison_config(mapping.get("momentum_comparison"))
 
     # CLI overrides config
     if args.load_ckpt_name is not None:
@@ -106,6 +112,20 @@ def main():
     eta_tuning_cfg = mapping.get("eta_tuning")
     if eta_tuning_cfg and eta_tuning_cfg.get("enabled", False):
         tune_eta_for_exp(exp_config, eta_tuning_cfg, gpu_ids=gpu_ids)
+    elif momentum_comparison.enabled:
+        results, final_config = run_momentum_comparison(
+            config=exp_config,
+            run_opts=run_opts,
+            comparison=momentum_comparison,
+            gpu_ids=gpu_ids,
+        )
+        if not args.no_plot:
+            plot_momentum_width_comparison(
+                results,
+                track_every=final_config.track_every,
+                use_linearized=final_config.use_linearized,
+                plot_output_dir=run_opts.plot_output_dir,
+            )
     else:
         results, final_config = run_exp(config=exp_config, run_opts=run_opts, gpu_ids=gpu_ids)
         if not args.no_plot:

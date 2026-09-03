@@ -72,9 +72,13 @@ def get_stats(model, params, params0, A0, A0_norm, data, metric_plan):
         if "train_loss" in metrics:
             stats["train_loss"] = train_loss
 
-    if "test_acc" in metrics:
-        test_acc, _ = _classification_metrics(model, X_test, y_test)
-        stats["test_acc"] = test_acc
+    if "test_acc" in metrics or "test_loss" in metrics:
+        test_targets = data.get("y_test_one_hot", y_test) if "test_loss" in metrics else None
+        test_acc, test_loss = _classification_metrics(model, X_test, y_test, test_targets)
+        if "test_acc" in metrics:
+            stats["test_acc"] = test_acc
+        if "test_loss" in metrics:
+            stats["test_loss"] = test_loss
 
     if "param_dist" in metrics:
         stats["param_dist"] = _param_dist(params, params0)

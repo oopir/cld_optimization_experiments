@@ -137,7 +137,46 @@ def _save_individual_axes(fig, axes, axes_list, plot_output_dir):
         legend.set_visible(legend_was_visible)
 
 
-def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_output_dir="plots"):
+def _dedup_legend_entries(axes):
+    """Collect unique legend entries from all visible axes, preserving first occurrence."""
+    handles = []
+    labels = []
+    seen = set()
+    for ax in axes:
+        if not ax.get_visible():
+            continue
+        ax_handles, ax_labels = ax.get_legend_handles_labels()
+        for handle, label in zip(ax_handles, ax_labels):
+            if not label or label.startswith("_") or label in seen:
+                continue
+            seen.add(label)
+            handles.append(handle)
+            labels.append(label)
+    return handles, labels
+
+
+def _add_outside_legend(fig, axes_list):
+    handles, labels = _dedup_legend_entries(axes_list)
+    if not handles:
+        return None
+    return fig.legend(
+        handles,
+        labels,
+        loc="center left",
+        bbox_to_anchor=(1.01, 0.5),
+        frameon=False,
+        fontsize=9,
+    )
+
+
+def plot_ex1_multiseed(
+    results,
+    epochs,
+    track_every,
+    use_linearized=True,
+    plot_output_dir="plots",
+    legend_mode="in_axes",
+):
     """
     Plot one internally consistent experiment batch.
 
@@ -148,6 +187,9 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
     Different history lengths from early stopping are okay; histories are
     truncated per run to epochs all seeds reached.
     """
+    if legend_mode not in {"in_axes", "outside"}:
+        raise ValueError("legend_mode must be 'in_axes' or 'outside'")
+
     plot_output_dir = Path(plot_output_dir)
     plot_output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -333,28 +375,34 @@ def plot_ex1_multiseed(results, epochs, track_every, use_linearized=True, plot_o
         if name not in plotted_axes:
             ax.set_visible(False)
 
-    if "jacobian_dist_l2" in plotted_axes:
-        ax1l.legend(
-            loc="center",
-            bbox_to_anchor=(0.76, 0.30),
-            frameon=False,
-            fontsize=12,
-        )
-    if "nn_to_lin_dist_l2" in plotted_axes:
-        ax2l.legend(
-            loc="center",
-            bbox_to_anchor=(0.76, 0.30),
-            frameon=False,
-            fontsize=12,
-        )
-    if "train_loss" in plotted_axes:
-        ax3l.legend(loc="best", frameon=False, fontsize=12)
-    plt.tight_layout(rect=[0, 0, 1, 0.93])
-
     axes_list = [ax1l, ax1r, ax2l, ax2r, ax3l, ax3r, ax4l, ax4r]
+    if legend_mode == "in_axes":
+        if "jacobian_dist_l2" in plotted_axes:
+            ax1l.legend(
+                loc="center",
+                bbox_to_anchor=(0.76, 0.30),
+                frameon=False,
+                fontsize=12,
+            )
+        if "nn_to_lin_dist_l2" in plotted_axes:
+            ax2l.legend(
+                loc="center",
+                bbox_to_anchor=(0.76, 0.30),
+                frameon=False,
+                fontsize=12,
+            )
+        if "train_loss" in plotted_axes:
+            ax3l.legend(loc="best", frameon=False, fontsize=12)
+
+    tight_rect = [0, 0, 0.78, 0.93] if legend_mode == "outside" else [0, 0, 1, 0.93]
+    plt.tight_layout(rect=tight_rect)
+
     axes_to_save = {name: ax for name, ax in axes.items() if name in plotted_axes}
     if axes_to_save:
         _save_individual_axes(fig, axes_to_save, axes_list, plot_output_dir)
+
+    if legend_mode == "outside":
+        _add_outside_legend(fig, axes_list)
 
     fig.savefig(plot_output_dir / "expr1_full.pdf", bbox_inches="tight")
 

@@ -75,6 +75,7 @@ from typing import Iterable, Optional, Tuple
 BASE_METRIC_NAMES = (
     "train_loss",
     "train_acc",
+    "test_loss",
     "test_acc",
     "param_dist",
     "feat_rel_dist",
