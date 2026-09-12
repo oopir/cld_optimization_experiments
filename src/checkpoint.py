@@ -54,7 +54,7 @@ class ResumeState:
 
 
 def timestamped_checkpoint_path(ckpt_dir: Path, first_seed: int, checkpoint_state: str = "metrics_only") -> Path:
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S") 
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     suffix = "" if checkpoint_state == "resumable_state" else "_metrics.pt"
     candidate = ckpt_dir / f"ckpt_{stamp}_{first_seed}{suffix}"
     counter = 1

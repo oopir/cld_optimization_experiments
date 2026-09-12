@@ -1,2 +1,1 @@
-"""experiment engine."""
-
+"""Single-device experiment engine."""

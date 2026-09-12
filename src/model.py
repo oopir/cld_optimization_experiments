@@ -69,9 +69,7 @@ def _initialized_weight(
     seed: int,
     max_chunk_elements: int,
 ) -> torch.Tensor:
-    """Initialize a dense tensor from deterministic global row chunks."""
-    # TODO: In the single-device engine, replace temporary chunk generation with
-    # in-place initialization of `out` if that preserves the desired seed behavior.
+    """Initialize a dense tensor in deterministic chunks to limit allocation size."""
     out = torch.empty((rows, cols), device=device, dtype=torch.float32)
     rows_per_chunk = max(1, max_chunk_elements // max(1, cols))
     for chunk_idx, start in enumerate(range(0, rows, rows_per_chunk)):
@@ -119,8 +117,8 @@ class MLP(nn.Module):
         self.lin_hidden = nn.ParameterList()
         self.init_hidden: list[torch.Tensor] = []
 
-        # TODO: Simplify the legacy per-layer/per-chunk seed derivation while
-        # retaining a separate checkpointable generator for Langevin noise.
+        # Per-layer offsets make initialization reproducible independently of
+        # the checkpointable generator used for Langevin noise.
         base_seed = int(seed) * 1_000_003
         for idx, spec in enumerate(self.layer_specs[:-1]):
             init = _initialized_weight(

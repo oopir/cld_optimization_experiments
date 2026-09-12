@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-import argparse, math, os, sys
+from __future__ import annotations
+
+import argparse
+import math
+import os
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if Path.cwd().resolve() != REPO_ROOT:
@@ -22,14 +27,14 @@ import torch
 DISTANCE_COMPONENTS = {"l2": 0, "cosine": 1}
 
 
-def _checkpoint_payload_path(path):
+def _checkpoint_payload_path(path: Path) -> Path:
     path = Path(path).expanduser()
     if path.is_dir():
         return path / "results.pt"
     return path
 
 
-def load_supported_checkpoint(path):
+def load_supported_checkpoint(path: Path):
     payload_path = _checkpoint_payload_path(path)
     payload = torch.load(payload_path, map_location="cpu", weights_only=False)
     if not isinstance(payload, dict):
@@ -38,8 +43,8 @@ def load_supported_checkpoint(path):
     payload_type = payload.get("type")
     if payload_type not in {"sharded_exp1", "single_device_deep_exp1"}:
         raise ValueError(
-            f"{payload_path}: expected a supported checkpoint, got type {payload_type!r}. "
-            "Use plot_metric_per_seed.py for original exp1 checkpoints."
+            f"{payload_path}: expected a compatible metrics checkpoint, "
+            f"got type {payload_type!r}."
         )
 
     config = payload.get("config")
@@ -234,10 +239,12 @@ def plot_all_curves(results, cfg, metric, out, yscale, lw, ylabel, title, distan
     fig.savefig(out, bbox_inches="tight", dpi=300)
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("ckpt")
-    p.add_argument("--metric", default="feat_gram_lambda_hist")
+def main() -> None:
+    p = argparse.ArgumentParser(
+        description="Plot one metric for every beta and seed in a checkpoint."
+    )
+    p.add_argument("ckpt", help="Merged metrics checkpoint or checkpoint directory.")
+    p.add_argument("--metric", default="feat_gram_lambda_hist", help="Metric-history key to plot.")
     p.add_argument("--distance-type", choices=sorted(DISTANCE_COMPONENTS), default=None)
     p.add_argument("--ylabel", default=None)
     p.add_argument("--title", default=None)
@@ -246,7 +253,7 @@ def main():
     p.add_argument("--beta-linewidth", type=float, default=1.4)
     p.add_argument("--all-linewidth", type=float, default=2)
     p.add_argument("--out-prefix", default=None)
-    p.add_argument("--outdir", default="plots")
+    p.add_argument("--outdir", default="plots", help="Directory for generated PDF files.")
     args = p.parse_args()
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)

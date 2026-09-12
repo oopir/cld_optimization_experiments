@@ -1,16 +1,21 @@
-# PDFs
-*.pdf
+# Generated experiment artifacts
+cld_checkpoints/
 plots/
-
-# Logs
+slurm_logs/
 *.log
+*.pdf
 
-# Python cache
+# Python and tool caches
 __pycache__/
 *.py[cod]
 *$py.class
 *.cpython-*.pyc
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
 
-# Misc
-cld_checkpoints/
+# Local development environments and editor settings
+.env
+.venv/
+.conda/
 .vscode/
