@@ -1,3 +1,9 @@
+"""Plot helpers for single-device deep experiments.
+
+This module intentionally mirrors the established plotting implementation while
+remaining independent of the archived ``src`` experiment package.
+"""
+
 from itertools import cycle
 from pathlib import Path
 import warnings

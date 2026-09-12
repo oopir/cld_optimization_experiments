@@ -46,8 +46,12 @@ def load_digits_data(n, random_labels=False, device="cpu", seed=42):
     X = _normalize_rows(digits.data, pixel_scale=16.0)
     y = digits.target.astype(np.int64)
 
-    X_train, X_tmp, y_train, y_tmp = train_test_split(X, y, train_size=n, stratify=y, random_state=seed)
-    _, X_test, _, y_test = train_test_split(X_tmp, y_tmp, test_size=max(100, n//5), stratify=y_tmp, random_state=seed)
+    X_train, X_tmp, y_train, y_tmp = train_test_split(
+        X, y, train_size=n, stratify=y, random_state=seed
+    )
+    _, X_test, _, y_test = train_test_split(
+        X_tmp, y_tmp, test_size=max(100, n // 5), stratify=y_tmp, random_state=seed
+    )
 
     if random_labels:
         y_train = _randomize_labels(y_train, seed)
@@ -71,11 +75,17 @@ def load_mnist_data(n, random_labels=False, device="cpu", seed=42, reserve_last=
         y = y[0 : y.shape[0] - reserve_last]
 
     standard_split_limit = 60000 - reserve_last
-    if n*(6/5) < standard_split_limit:
-        X_train, X_tmp, y_train, y_tmp = train_test_split(X, y, train_size=n, stratify=y, random_state=seed)
-        _, X_test, _, y_test = train_test_split(X_tmp, y_tmp, test_size=max(100, n//5), stratify=y_tmp, random_state=seed)
+    if n * (6 / 5) < standard_split_limit:
+        X_train, X_tmp, y_train, y_tmp = train_test_split(
+            X, y, train_size=n, stratify=y, random_state=seed
+        )
+        _, X_test, _, y_test = train_test_split(
+            X_tmp, y_tmp, test_size=max(100, n // 5), stratify=y_tmp, random_state=seed
+        )
     else:
-        X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.8, stratify=y, random_state=seed)
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, train_size=0.8, stratify=y, random_state=seed
+        )
         print(
             "Requested n is too large for the standard MNIST split "
             f"(n={n}, standard split limit after reserve_last={standard_split_limit}, "

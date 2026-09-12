@@ -1,16 +1,59 @@
-from pathlib import Path
-from dataclasses import dataclass, field, fields, MISSING, is_dataclass
-from typing import Optional, List
-import torch
+from __future__ import annotations
 
-from . import metric_checkpoints  # noqa: F401; keep old checkpoint classes importable for torch.load
-from .metric_config import METRIC_SCHEMA_VERSION, resolve_metric_plan
+from dataclasses import dataclass, field, fields
+from pathlib import Path
+from typing import Iterable, Mapping, Optional
+import math
+
+import yaml
+
+
+METRIC_SCHEMA_VERSION = 1
+
+BASE_HISTORY_METRICS = (
+    "train_loss",
+    "train_acc",
+    "test_acc",
+    "param_dist",
+    "feat_gram_lambda",
+)
+LIN_HISTORY_METRICS = (
+    "lin_train_loss",
+    "lin_train_acc",
+    "lin_test_acc",
+    "lin_param_dist",
+)
+PAIR_HISTORY_METRICS = (
+    "nn_lin_param_dist",
+    "jacobian_dist",
+)
+SUPPORTED_HISTORY_METRICS = BASE_HISTORY_METRICS + LIN_HISTORY_METRICS + PAIR_HISTORY_METRICS
+PRINT_METRICS = ("train_loss", "train_acc", "test_acc")
+LINEARIZED_METRICS = LIN_HISTORY_METRICS + ("nn_lin_param_dist",)
+DEPRECATED_FEATURE_METRICS = ("feat_rel_dist", "feat_cos_dist")
+
+
+@dataclass(frozen=True)
+class MetricPlan:
+    tracked_metrics: tuple[str, ...]
+    history_metrics: frozenset[str]
+    compute_metrics: frozenset[str]
+
+    @property
+    def needs_linearized_metrics(self) -> bool:
+        return any(name in self.compute_metrics for name in LINEARIZED_METRICS)
+
+    @property
+    def needs_jacobian_reference(self) -> bool:
+        return "jacobian_dist" in self.compute_metrics
+
 
 @dataclass
 class ExpConfig:
     # parallelization
-    seeds: list = field(default_factory=lambda: [0])
-    device: str = "cpu"
+    seeds: list[int] = field(default_factory=lambda: [0])
+    device: str = "cuda"
+    gpu_indices: Optional[list[int]] = None
     # data
     dataset: str = "digits"
     n: int = 10
@@ -18,19 +61,21 @@ class ExpConfig:
     reserve_last: int = 1000
     # model
     m: int = 1
+    L: int = 1
+    activation: str = "tanh"
     init_type: str = "standard"
     # training
     epochs: int = 1
-    eta: float  = 1.0
-    eta_mode: str = "scalar"               # "scalar", "per_beta", "per_alpha_beta"
-    eta_table_path: Optional[str] = None   # path to YAML table
-    eta_default: Optional[float] = None    # fallback if key missing (defaults to eta if None)
-    betas: list = field(default_factory=lambda: [])
-    alphas: list = field(default_factory=lambda: [])
+    eta: float = 1.0
+    eta_mode: str = "scalar"
+    eta_table_path: Optional[str] = None
+    eta_default: Optional[float] = None
+    betas: list[float] = field(default_factory=list)
+    alphas: list[float] = field(default_factory=list)
     regularization_scale: float = 1.0
     lam_fc1: Optional[float] = None
+    lam_hidden: Optional[float] = None
     lam_fc2: Optional[float] = None
-    # early stopping & turning off noise
     noise_free_after_epoch: Optional[int] = None
     early_stop_metric: Optional[str] = None
     early_stop_goal: str = "min"
@@ -38,88 +83,215 @@ class ExpConfig:
     # stats
     use_linearized: bool = True
     same_noise: bool = False
-    tracked_metrics: Optional[List[str]] = None
-    track_jacobian: bool = True # Legacy metric shim: only used to build default metrics when tracked_metrics is omitted.
-    jac_probe_size: int = 10
+    tracked_metrics: Optional[list[str]] = None
+    track_jacobian: bool = True
+    jac_probe_size: int = 1
     track_every: int = 10
-    print_every: int = 100 # Legacy metric shim: only used to build default metrics when tracked_metrics is omitted.
+    print_every: int = 100
     collect_feature_stats: bool = True
+    checkpoint_state: str = "metrics_only"
 
 
 @dataclass
 class RunOpts:
-    ckpt_dir:         Path
-    save_ckpt:        bool = False # for saving progress after training
-    load_ckpt:        bool = False # for plotting/extending an existing ckpt
-    load_ckpt_name:   Optional[Path] = None
+    ckpt_dir: Path
+    save_ckpt: bool = False
+    load_ckpt: bool = False
+    load_ckpt_name: Optional[Path] = None
     resume_from_ckpt: bool = False
     new_total_epochs: Optional[int] = None
-    config_overrides: Optional[List[str]] = None
-    plot_output_dir:  Path = Path("plots")
+    config_overrides: Optional[list[str]] = None
+    plot_output_dir: Path = Path("plots")
 
 
-def save_checkpoint(path, results, config: ExpConfig):
-    metric_plan = resolve_metric_plan(
-        tracked_metrics=getattr(config, "tracked_metrics", None),
-        use_linearized=getattr(config, "use_linearized", True),
-        track_jacobian=getattr(config, "track_jacobian", True),
-        collect_feature_stats=getattr(config, "collect_feature_stats", True),
-        early_stop_metric=getattr(config, "early_stop_metric", None),
-    )
-    payload = {
-        "type": "exp1",
-        "config": config,
-        "metric_schema_version": METRIC_SCHEMA_VERSION,
-        "tracked_metrics": list(metric_plan.tracked_metrics),
-        "results": results,
-    }
-    torch.save(payload, path)
+def _parse_beta(beta) -> float:
+    if isinstance(beta, str) and beta in {".inf", "inf", "+inf"}:
+        return math.inf
+    return float(beta)
 
-def patch_loaded_config(config):
-    """
-    Fill fields missing from dataclass checkpoint configs.
 
-    This runs after torch.load succeeds. It does not replace metric_checkpoints.py,
-    which is needed earlier if an old pickle refers to that module path.
-    """
-    if not is_dataclass(config):
-        return config
+def _prepare_dataclass_kwargs(cls, kwargs: Mapping) -> dict:
+    field_names = {f.name for f in fields(cls)}
+    unknown = set(kwargs) - field_names
+    if unknown:
+        raise ValueError(f"Unknown {cls.__name__} config field(s): {', '.join(sorted(unknown))}")
+    return {k: v for k, v in kwargs.items() if k in field_names}
 
-    for f in fields(config):
-        if hasattr(config, f.name):
+
+def _expand_path_arg(kwargs: dict, key: str) -> None:
+    if key in kwargs and kwargs[key] is not None:
+        kwargs[key] = Path(kwargs[key]).expanduser()
+
+
+def build_from_config_mapping(cfg: Mapping) -> tuple[ExpConfig, RunOpts]:
+    exp_kwargs = dict(cfg.get("experiment", cfg))
+    run_kwargs = dict(cfg.get("run", {}))
+
+    if "betas" in exp_kwargs:
+        exp_kwargs["betas"] = [_parse_beta(b) for b in exp_kwargs["betas"]]
+
+    exp_config = ExpConfig(**_prepare_dataclass_kwargs(ExpConfig, exp_kwargs))
+
+    _expand_path_arg(run_kwargs, "ckpt_dir")
+    _expand_path_arg(run_kwargs, "load_ckpt_name")
+    _expand_path_arg(run_kwargs, "plot_output_dir")
+    run_opts = RunOpts(**_prepare_dataclass_kwargs(RunOpts, run_kwargs))
+    return exp_config, run_opts
+
+
+def load_mapping(path: Path) -> dict:
+    with path.expanduser().open("r") as f:
+        data = yaml.safe_load(f)
+    return data or {}
+
+
+def default_tracked_metrics(use_linearized: bool, track_jacobian: bool) -> list[str]:
+    metrics = ["train_loss", "feat_gram_lambda"]
+    if use_linearized:
+        metrics.extend(["lin_train_loss", "lin_param_dist", "nn_lin_param_dist"])
+    if track_jacobian:
+        metrics.append("jacobian_dist")
+    return metrics
+
+
+def resolve_metric_plan(config: ExpConfig) -> MetricPlan:
+    if config.tracked_metrics is None:
+        requested = default_tracked_metrics(config.use_linearized, config.track_jacobian)
+    else:
+        requested = list(config.tracked_metrics)
+
+    if config.early_stop_metric is not None and config.early_stop_metric not in requested:
+        requested.append(config.early_stop_metric)
+
+    deduped = []
+    seen = set()
+    for name in requested:
+        if name in seen:
             continue
+        seen.add(name)
+        deduped.append(name)
 
-        if f.default is not MISSING:
-            setattr(config, f.name, f.default)
-        elif f.default_factory is not MISSING:
-            setattr(config, f.name, f.default_factory())
-        else:
-            raise AttributeError(
-                f"Loaded checkpoint config is missing required field {f.name!r} "
-                f"and no default exists."
+    deprecated = sorted(set(deduped) & set(DEPRECATED_FEATURE_METRICS))
+    if deprecated:
+        raise ValueError(
+            "The engine only supports feat_gram_lambda for feature metrics; "
+            f"unsupported metric(s): {', '.join(deprecated)}"
+        )
+
+    unknown = sorted(set(deduped) - set(SUPPORTED_HISTORY_METRICS))
+    if unknown:
+        raise ValueError(f"Unsupported metric(s): {', '.join(unknown)}")
+
+    lin_requested = sorted(set(deduped) & set(LINEARIZED_METRICS))
+    if lin_requested and not config.use_linearized:
+        raise ValueError(
+            "Linearized metric(s) requested while use_linearized=False: "
+            + ", ".join(lin_requested)
+        )
+
+    if config.early_stop_metric in PAIR_HISTORY_METRICS:
+        raise ValueError(
+            f"early_stop_metric must be scalar; {config.early_stop_metric!r} stores an (L2, cosine) tuple."
+        )
+
+    compute_metrics = set(deduped)
+    compute_metrics.update(PRINT_METRICS)
+    return MetricPlan(
+        tracked_metrics=tuple(deduped),
+        history_metrics=frozenset(deduped),
+        compute_metrics=frozenset(compute_metrics),
+    )
+
+
+def validate_config(config: ExpConfig) -> None:
+    if config.L < 1:
+        raise ValueError(f"L must be >= 1, got {config.L}")
+    if config.activation != "tanh":
+        raise ValueError("The deep engine only supports activation='tanh'.")
+    if config.jac_probe_size < 1:
+        raise ValueError(f"jac_probe_size must be >= 1, got {config.jac_probe_size}.")
+    if config.gpu_indices is not None:
+        if not str(config.device).startswith("cuda"):
+            raise ValueError(
+                "gpu_indices can only be set when device starts with 'cuda'."
             )
+        if len(config.gpu_indices) != 1:
+            raise ValueError(
+                "The single-device engine accepts exactly one gpu_indices entry."
+            )
+        index = config.gpu_indices[0]
+        if not isinstance(index, int) or index < 0:
+            raise ValueError(
+                f"gpu_indices must contain one non-negative integer, got {config.gpu_indices}."
+            )
+    if config.checkpoint_state not in {"metrics_only", "resumable_state"}:
+        raise ValueError(
+            "checkpoint_state must be 'metrics_only' or the legacy 'resumable_state'."
+        )
+    if config.early_stop_goal not in {"min", "max"}:
+        raise ValueError("early_stop_goal must be 'min' or 'max'.")
+    resolve_metric_plan(config)
 
-    return config
 
-def _load_checkpoint_payload(path):
-    payload = torch.load(path, map_location="cpu", weights_only=False)
+def resolve_device(config: ExpConfig):
+    import torch
 
-    payload_type = payload.get("type", "exp1") # 2nd argument "tolerates" old ckpts w/o "type" field
-    if payload_type != "exp1":
-        raise ValueError(f"Unexpected checkpoint type: {payload_type}")
+    requested = str(config.device)
+    if requested.startswith("cuda"):
+        if not torch.cuda.is_available():
+            raise RuntimeError("device='cuda' was requested but CUDA is unavailable.")
+        if config.gpu_indices is not None:
+            index = config.gpu_indices[0]
+        elif ":" in requested:
+            index = int(requested.split(":", 1)[1])
+        else:
+            index = 0
+        if index >= torch.cuda.device_count():
+            raise ValueError(
+                f"CUDA device {index} is unavailable; torch sees {torch.cuda.device_count()} device(s)."
+            )
+        device = torch.device(f"cuda:{index}")
+        torch.cuda.set_device(device)
+        return device
+    if requested != "cpu":
+        raise ValueError(f"Unsupported device={config.device!r}; use 'cpu' or 'cuda'.")
+    return torch.device("cpu")
 
-    payload["config"] = patch_loaded_config(payload["config"])
-    return payload
 
-def load_checkpoint(path):
-    payload = _load_checkpoint_payload(path)
-    return payload["results"], payload["config"]
+def _format_scalar_for_key(x: float) -> str:
+    if math.isinf(float(x)):
+        return "inf"
+    x_float = float(x)
+    if x_float.is_integer():
+        return str(int(x_float))
+    return str(x_float)
 
-def load_checkpoint_with_metadata(path):
-    payload = _load_checkpoint_payload(path)
-    metadata = {
-        "metric_schema_version": payload.get("metric_schema_version"),
-        "tracked_metrics": payload.get("tracked_metrics"),
-        "has_metric_metadata": "tracked_metrics" in payload,
-    }
-    return payload["results"], payload["config"], metadata
+
+def load_eta_table(path: Optional[str]) -> dict:
+    if path is None:
+        return {}
+    eta_path = Path(path).expanduser()
+    if not eta_path.is_file():
+        print(f"[eta] WARNING: eta_table_path '{eta_path}' not found; using defaults.")
+        return {}
+    with eta_path.open("r") as f:
+        return yaml.safe_load(f) or {}
+
+
+def resolve_eta(config: ExpConfig, alpha: float, beta: float) -> float:
+    default_eta = config.eta if config.eta_default is None else config.eta_default
+    if config.eta_mode == "scalar" or config.eta_table_path is None:
+        return float(config.eta)
+
+    table = load_eta_table(config.eta_table_path)
+    if config.eta_mode == "per_beta":
+        per_beta = table.get("per_beta", {})
+        key = _format_scalar_for_key(beta)
+        return float(per_beta.get(key, default_eta))
+
+    if config.eta_mode == "per_alpha_beta":
+        per_ab = table.get("per_alpha_beta", {})
+        key = f"alpha={_format_scalar_for_key(alpha)},beta={_format_scalar_for_key(beta)}"
+        return float(per_ab.get(key, default_eta))
+
+    raise ValueError(f"Unknown eta_mode: {config.eta_mode}")
