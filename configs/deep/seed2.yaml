@@ -1,5 +1,5 @@
 experiment:
-  seeds: [1]
+  seeds: [2]
   n: 10
   random_labels: false
   betas: [100, 500, 1000, .inf]
@@ -20,5 +20,5 @@ experiment:
   print_every: 2500
   checkpoint_state: resumable_state
 run:
-  ckpt_dir: "cld_checkpoints"
+  ckpt_dir: "cld_checkpoints/deep"
   save_ckpt: true

@@ -1,11 +1,11 @@
 experiment:
-  seeds: [0]
+  seeds: [3]
   n: 10
   random_labels: false
   betas: [100, 500, 1000, .inf]
-  epochs: 10000
+  epochs: 50000
   eta: 1.0e-5
-  m: 100
+  m: 10000
   L: 3
   activation: tanh
   dataset: digits
@@ -20,5 +20,5 @@ experiment:
   print_every: 2500
   checkpoint_state: resumable_state
 run:
-  ckpt_dir: "cld_checkpoints"
+  ckpt_dir: "cld_checkpoints/deep"
   save_ckpt: true
