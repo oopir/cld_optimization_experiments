@@ -24,7 +24,7 @@ from src.exp import run_exp
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run single-device deep dense-network experiments.")
+    parser = argparse.ArgumentParser(description="Run single-device dense-network experiments.")
     parser.add_argument("--config", type=Path, required=True, help="Path to YAML config file.")
     parser.add_argument("--load-ckpt-name", type=Path, default=None, help="Override run.load_ckpt_name.")
     parser.add_argument("--new-total-epochs", type=int, default=None, help="Override run.new_total_epochs.")

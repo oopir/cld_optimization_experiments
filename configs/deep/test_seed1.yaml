@@ -20,5 +20,5 @@ experiment:
   print_every: 2500
   checkpoint_state: resumable_state
 run:
-  ckpt_dir: "cld_checkpoints/deep"
+  ckpt_dir: "cld_checkpoints/deep_test"
   save_ckpt: true

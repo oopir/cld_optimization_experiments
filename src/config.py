@@ -207,7 +207,7 @@ def validate_config(config: ExpConfig) -> None:
     if config.L < 1:
         raise ValueError(f"L must be >= 1, got {config.L}")
     if config.activation != "tanh":
-        raise ValueError("The deep engine only supports activation='tanh'.")
+        raise ValueError("The engine only supports activation='tanh'.")
     if config.jac_probe_size < 1:
         raise ValueError(f"jac_probe_size must be >= 1, got {config.jac_probe_size}.")
     if config.gpu_indices is not None:
@@ -226,7 +226,7 @@ def validate_config(config: ExpConfig) -> None:
             )
     if config.checkpoint_state not in {"metrics_only", "resumable_state"}:
         raise ValueError(
-            "checkpoint_state must be 'metrics_only' or the legacy 'resumable_state'."
+            "checkpoint_state must be 'metrics_only' or 'resumable_state'."
         )
     if config.early_stop_goal not in {"min", "max"}:
         raise ValueError("early_stop_goal must be 'min' or 'max'.")

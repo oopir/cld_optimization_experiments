@@ -1,20 +1,21 @@
 # Global Convergence in Deep Networks via the Second Law of Thermodynamics
 
-Code for the numerical experiments shown in the paper [Global Convergence in Deep Networks via the Second Law of Thermodynamics]().
+Code for the numerical experiments shown in the paper "Global Convergence in Deep Networks via the Second Law of Thermodynamics" (accepted to NeurIPS 2026).
 
 ## Requirements
 
-The final configurations require Linux with a CUDA-capable GPU. They were run
-with Python 3.11, PyTorch 2.4.1, and CUDA 12.1. The supplied `environment.yml`
-provides a reproducible Conda setup:
+The final configurations require Linux with a CUDA-capable GPU. The experiments 
+were run with Python 3.11, PyTorch 2.4.1, and CUDA 12.1. The supplied `environment.yml` 
+specifies the package versions used in our experiments and can be used to create a 
+compatible Conda environment:
 
 ```bash
 conda env create -f environment.yml
 conda activate cld-opt
 ```
 
-Conda is not required: another environment manager may be used if it provides
-the runtime dependencies and versions specified in `environment.yml`.
+Conda is not required; another environment manager may be used with the versions 
+listed in `environment.yml`.
 
 Run all commands below from the repository root. The scripts intentionally
 reject other working directories so that relative configuration and output

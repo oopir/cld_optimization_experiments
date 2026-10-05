@@ -1,8 +1,4 @@
-"""Plot helpers for single-device deep experiments.
-
-This module intentionally mirrors the established plotting implementation while
-remaining independent of the archived ``src`` experiment package.
-"""
+"""Plot helpers for single-device deep experiments."""
 
 from itertools import cycle
 from pathlib import Path
@@ -336,8 +332,6 @@ def plot_ex1_multiseed(
             ax.set_ylim(-0.05, 0.7)
         if k in log_axes:
             ax.set_yscale("log")
-            # if k == "feat_gram_lambda":
-                # ax.set_ylim(1.0e4, 2.2e4)
             scale = 1e4
             fmt = mticker.FuncFormatter(lambda y, _: f"{y / scale:g}")
             ax.yaxis.set_major_formatter(fmt)
